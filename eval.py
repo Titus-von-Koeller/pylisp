@@ -21,21 +21,6 @@ n = Node(print, x, y)
 p = Node(print, Node(printr, n), n)
 
 def evaluate(AST):
-    grandchildren = []
-    for child in AST.children:
-        if child.children:
-            grandchildren.extend(child.children)
-    if not grandchildren or AST.value in non_recursing:
-        ops = [child.value for child in AST.children]
-        return AST.value(*ops)
-
-    results = []
-    for child in AST.children:
-        if child.value not in non_recursing:
-            results.append(evaluate(child))
-    AST.value(*results)
-
-def evaluate(AST):
     if isinstance(AST.value, Callable):
         if AST.value not in non_recursing:
             return AST.value(*[evaluate(child) for child in AST.children])
