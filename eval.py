@@ -1,40 +1,49 @@
 #!/usr/bin/env python3
-from operator import add
+from operator import add, mul
 from collections import Callable
 
 # top -> down evaluation
 
 class Node:
-    def __init__(self, value, *children):
-        self.value    = value
+    def __init__(self, *children, env=None):
         self.children = children
     def __repr__(self):
-        return f'Node({self.value}, *{self.children})'
-    def __call__(self, env=None):
-        return self.value(*[child(env=env) for child in self.children])
+        return f'{type(self).__name__}(*{self.children})'
+
+def create_pyfunc(func, recurse=True):
+    class Pyfunc(Node):
+        def __call__(self, env=None):
+            args = self.children
+            if recurse:
+                return func(*[child(env=env) for child in args])
+            else:
+                return func(*args)
+    return Pyfunc
+Print  = create_pyfunc(print)
+Printr = create_pyfunc(print, recurse=False)
+Add    = create_pyfunc(add)
+Mul    = create_pyfunc(mul)
+
+def create_ufunc(args, body):
+    class Ufunc(Node):
+        def __call__(self, env=None):
+            local_env = {**env}
+            local_env.update(zip(args, self.children))
+            return body(env=local_env)
+    return Ufunc
 
 class Atom(Node):
     def __init__(self, value):
         super().__init__(value)
     def __call__(self, env=None):
-        return self.value
-
-class Printr(Node):
-    def __init__(self, *children):
-        super().__init__(print, *children)
-    def __call__(self, env=None):
-        return self.value(*self.children)
+        return self.children[0]
 
 class Suite(Node):
-    def __init__(self, *children):
-        super().__init__(Suite, *children)
     def __call__(self, env=None):
         for child in self.children:
             child(env=env)
 
-class Unbound:
-    def __init__(self, *children):
-        self.children = children
+class Var(Node):
     def __call__(self, env=None):
         if env is None:
             env = {**DEFAULT_ENV}
@@ -46,23 +55,34 @@ class Unbound:
         return node(env=env)
 
 class Setq(Node):
-    def __init__(self, var, val):
-        super().__init__(Setq, var, val)
     def __call__(self, env=None):
         var, val = self.children 
         val = Atom(val())
         env[var] = val
         return val
 
+class Define(Node):
+    def __call__(self, env=None):
+        var, val = self.children 
+        env[var] = val
+        return val
+
+class Lambda(Node):
+    def __init__(self, args, body):
+        super().__init__(args, body)
+    def __call__(self, env=None):
+        args, body = self.children
+        return create_ufunc(args, body)
+
+
 DEFAULT_ENV = {'printr' : Printr, }
 
-# (print (+ 1 1) (+ 2 2))
-x = Node(add, Unbound('x'), Atom(1))
-y = Node(add, Atom(2), Atom(2))
-n = Node(print, x, y)
-p = Suite(Setq('x', Node(add, Atom(100), Atom(11))), 
-          Unbound('printr', n), 
-          n)
-    
-p(env={**DEFAULT_ENV})
+p = Suite(
+    Setq('x', Atom('str')),
+    Define('repeat', Lambda(['x'], Mul(Var('x'), Atom(3)))),
+    Print(Var('repeat', Var('x'))),
+    )
 
+# (define add3 (lambda (x y z) (+ x (+ y z)))
+rv = p(env={**DEFAULT_ENV})
+print(f'rv = {rv}')
