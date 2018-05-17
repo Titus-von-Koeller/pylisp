@@ -26,6 +26,8 @@ class Printr(Node):
         return self.value(*self.children)
 
 class Suite(Node):
+    def __init__(self, *children):
+        super().__init__(Suite, *children)
     def __call__(self, env=None):
         for child in self.children:
             child(env=env)
@@ -43,13 +45,24 @@ class Unbound:
             node = env[value]
         return node(env=env)
 
+class Setq(Node):
+    def __init__(self, var, val):
+        super().__init__(Setq, var, val)
+    def __call__(self, env=None):
+        var, val = self.children 
+        val = Atom(val())
+        env[var] = val
+        return val
+
 DEFAULT_ENV = {'printr' : Printr, }
 
 # (print (+ 1 1) (+ 2 2))
 x = Node(add, Unbound('x'), Atom(1))
 y = Node(add, Atom(2), Atom(2))
 n = Node(print, x, y)
-p = Suite(None, Unbound('printr', n), n)
+p = Suite(Setq('x', Node(add, Atom(100), Atom(11))), 
+          Unbound('printr', n), 
+          n)
     
-p(env={**DEFAULT_ENV, 'x':Atom(101)})
+p(env={**DEFAULT_ENV})
 
