@@ -27,11 +27,13 @@ Div    = create_pyfunc(truediv)
 Lt     = create_pyfunc(lt)
 Gt     = create_pyfunc(gt)
 
-def create_ufunc(args, body):
+def create_ufunc(args, body, varargs=None):
     class Ufunc(Node):
         def __call__(self, env=None):
             local_env = {**env}
             local_env.update(zip(args, self.children))
+            if varargs is not None:
+                local_env[varargs] = self.children[len(args):]
             return body(env=local_env)
     return Ufunc
 
@@ -90,6 +92,7 @@ class Var(Node):
             env = {**DEFAULT_ENV}
         value, *children = self.children
         if children:
+            print(value, env[value])
             node = env[value](*children)
         else:
             node = env[value]
@@ -132,6 +135,7 @@ class While(Node):
 #         return val
 
 Lambda = create_ufunc
+VarArgsLambda = lambda args, body, varargs: create_ufunc(args, body, varargs)
 
 DEFAULT_ENV = {'printr' : Printr, }
 
@@ -156,7 +160,24 @@ h = Setq('h', Lambda(['x'], Suite(
     Print(Atom('inside h after'), Var('x')),
     )))
 
-g = Suite(
+s = Setq(
+    'sum', 
+    VarArgsLambda(
+        [], 
+        'nums', 
+        Suite(
+            Print(Var('nums')),
+        )
+    )
+)
+    
+p = {
+'var_args' : Suite(
+    s,
+    Call('sum', Atom(1), Atom(2), Atom(3))
+),
+
+'func_call' : Suite(
     Setq('x', Atom(1)),
     h,
     g,
@@ -164,9 +185,9 @@ g = Suite(
     Call('f', Var('x')),
     Setq('y', Atom(-1)),
     IfElse(Lt(Var('y'), Atom(0)), Print(Atom('Smaller')), Print(Atom('Bigger')))
-    )
+    ),
 
-h = Suite(
+'loop' : Suite(
     Setq('x', Atom(10000)),
     While(
         Gt(Var('x'), Atom(0)), 
@@ -174,9 +195,9 @@ h = Suite(
             Print(Var('x')),
             Setq('x', Add(Var('x'), Atom(-1)))
         )
-    ))
+    )),
 
-p = Suite(
+'cons' : Suite(
     Setq(
         'x', 
         Cons(
@@ -186,13 +207,15 @@ p = Suite(
     ),
     Print(Atom('Car:'), Car(Var('x'))),
     Print(Atom('Cdr:'), Cdr(Var('x'))),
-    )
-# (define add3 (lambda (x y z) (+ x (+ y z)))
+    ),
+}
+
+test = 'var_args' 
 try:
-    rv = p(env={**DEFAULT_ENV})
+    rv = p[test](env={**DEFAULT_ENV})
 except Exception:
     from pdb import post_mortem
-    post_mortem()
+    # post_mortem()
     raise
     
 print(f'rv = {rv}')
