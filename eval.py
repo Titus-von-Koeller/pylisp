@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from operator import add, mul, lt, truediv
+from operator import add, mul, lt, gt, truediv
 from collections import Callable
 
 # top -> down evaluation
@@ -25,6 +25,7 @@ Add    = create_pyfunc(add)
 Mul    = create_pyfunc(mul)
 Div    = create_pyfunc(truediv)
 Lt     = create_pyfunc(lt)
+Gt     = create_pyfunc(gt)
 
 def create_ufunc(args, body):
     class Ufunc(Node):
@@ -45,6 +46,38 @@ class Atom(Node):
         super().__init__(value)
     def __call__(self, env=None):
         return self.children[0]
+
+class Cell(Node):
+    def __init__(self, head, tail):
+        super().__init__(Atom(head), Atom(tail))
+    head = property(lambda self: self.children[0])
+    tail = property(lambda self: self.children[1])
+    def __call__(self, env=None):
+        return self
+
+class Cons(Node):
+    def __init__(self, head, tail):
+        super().__init__(head, tail)
+    head = property(lambda self: self.children[0])
+    tail = property(lambda self: self.children[1])
+    def __call__(self, env=None):
+        return Cell(self.head(env=env), self.tail(env=env))
+
+class Car(Node):
+    def __init__(self, cell):
+        super().__init__(cell)
+    cell = property(lambda self: self.children[0])
+    def __call__(self, env=None):
+        return self.cell(env=env).head(env=env)
+Head = Car
+
+class Cdr(Node):
+    def __init__(self, cell):
+        super().__init__(cell)
+    cell = property(lambda self: self.children[0])
+    def __call__(self, env=None):
+        return self.cell(env=env).tail(env=env)
+Tail = Cdr
 
 class Suite(Node):
     def __call__(self, env=None):
@@ -92,11 +125,11 @@ class While(Node):
             rv = self.body(env=env)
         return rv
 
-class Define(Node):
-    def __call__(self, env=None):
-        var, val = self.children 
-        env[var] = val
-        return val
+# class Define(Node):
+#     def __call__(self, env=None):
+#         var, val = self.children 
+#         env[var] = val
+#         return val
 
 Lambda = create_ufunc
 
@@ -123,7 +156,7 @@ h = Setq('h', Lambda(['x'], Suite(
     Print(Atom('inside h after'), Var('x')),
     )))
 
-p = Suite(
+g = Suite(
     Setq('x', Atom(1)),
     h,
     g,
@@ -133,6 +166,33 @@ p = Suite(
     IfElse(Lt(Var('y'), Atom(0)), Print(Atom('Smaller')), Print(Atom('Bigger')))
     )
 
+h = Suite(
+    Setq('x', Atom(10000)),
+    While(
+        Gt(Var('x'), Atom(0)), 
+        Suite(
+            Print(Var('x')),
+            Setq('x', Add(Var('x'), Atom(-1)))
+        )
+    ))
+
+p = Suite(
+    Setq(
+        'x', 
+        Cons(
+            Atom(1),
+            Atom('a')
+        )
+    ),
+    Print(Atom('Car:'), Car(Var('x'))),
+    Print(Atom('Cdr:'), Cdr(Var('x'))),
+    )
 # (define add3 (lambda (x y z) (+ x (+ y z)))
-rv = p(env={**DEFAULT_ENV})
+try:
+    rv = p(env={**DEFAULT_ENV})
+except Exception:
+    from pdb import post_mortem
+    post_mortem()
+    raise
+    
 print(f'rv = {rv}')
