@@ -253,3 +253,32 @@ Nil = Nil()
 
 class UfuncBase(Node):
     pass
+
+class While(Node):
+    @debug
+    def __call__(self, env):
+        rv = Nil
+        while self.cond(env).value:
+            rv = self.body(env)
+        return rv
+    def __init__(self, cond, body):
+        super().__init__(cond, body)
+    cond = property(lambda self: self.children[0])
+    body = property(lambda self: self.children[1])
+
+class IfElse(Node):
+    @debug
+    def __call__(self, env):
+        rv = Nil
+        if self.cond(env).value:
+            rv = self.ifbody(env)
+        else:
+            if self.elsebody:
+                rv = self.elsebody(env)
+        return rv
+    def __init__(self, cond, ifbody, elsebody=None):
+        super().__init__(cond, ifbody, elsebody)
+    cond     = property(lambda self: self.children[0])
+    ifbody   = property(lambda self: self.children[1])
+    elsebody = property(lambda self: self.children[2])
+

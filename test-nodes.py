@@ -80,6 +80,85 @@ def test_arithmetic(x, y):
         ),
     )
 
+def test_controlflow():
+    def fizzbuzz(n):
+        for x in range(n, 0, -1):
+            if x % 15 == 0:
+                yield 'fizzbuzz'
+            elif x % 5 == 0:
+                yield 'buzz'
+            elif x % 3 == 0:
+                yield 'fizz'
+            else:
+                yield x
+    return Suite(
+        Setq(
+            Name('x'),
+            Atom(0),
+        ),
+        Setq(
+            Name('n'),
+            Atom(20),
+        ),
+        Setq(
+            Name('rv'),
+            Nil,
+        ),
+        While(
+            Lt(Var('x'), Var('n')),
+            Suite(
+                Setq(
+                    Name('x'),
+                    Add(Var('x'), Atom(1))
+                ),
+                IfElse(
+                    Eq(
+                        Mod(Var('x'), Atom(15)),
+                        Atom(0),
+                    ),
+                    Setq(
+                        Name('rv'),
+                        Cons(Atom('fizzbuzz'), Var('rv')),
+                    ),
+                    IfElse(
+                        Eq(
+                            Mod(Var('x'), Atom(5)),
+                            Atom(0),
+                        ),
+                        Setq(
+                            Name('rv'),
+                            Cons(Atom('buzz'), Var('rv')),
+                        ),
+                        IfElse(
+                            Eq(
+                                Mod(Var('x'), Atom(3)),
+                                Atom(0),
+                            ),
+                            Setq(
+                                Name('rv'),
+                                Cons(Atom('fizz'), Var('rv')),
+                            ),
+                            Setq(
+                                Name('rv'),
+                                Cons(Var('x'), Var('rv')),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        Assert(
+            Eq(
+                Var('rv'),
+                List( *[Atom(x) for x in fizzbuzz(20)] ),
+            ),
+            Atom('(fizzbuzz 20) failed!')
+        ),
+        Print(
+            Atom('All control flow tests passed!')
+        ),
+    )
+
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
@@ -96,6 +175,11 @@ if __name__ == '__main__':
 
     if 'arithmetic' in args.tests:
         suite = test_arithmetic(randint(1, 100), randint(1, 100))
+        logger.info(f'suite = %s',           suite.pformat())
+        logger.info(f'suite(env={{}}) = %r', suite(env={}))
+
+    if 'controlflow' in args.tests:
+        suite = test_controlflow()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
