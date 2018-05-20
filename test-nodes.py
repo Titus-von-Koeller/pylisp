@@ -46,6 +46,40 @@ def test_cons():
         ),
     )
 
+def test_arithmetic(x, y):
+    return Suite(
+        Comment(f'x = {x}, y = {y}'),
+        Setq(
+            Name('x'),
+            Atom(x),
+        ),
+        Setq(
+            Name('y'),
+            Atom(y),
+        ),
+        Assert(
+            Eq(
+                Neg(
+                    Div(
+                        Mul(
+                            Var('x'),
+                            Sub(Atom(4), Atom(2)),
+                        ),
+                        Mul(
+                            Var('y'),
+                            Add(Atom(1), Atom(1)),
+                        ),
+                    ),
+                ),
+                Atom( - (x * (4 - 2)) / (y * (1 + 1))  ),
+            ),
+            Atom('(- (/ (* x (- 4 2)) (* y (+ 1 1)))) failed'),
+        ),
+        Print(
+            Atom('All arithmetic tests passed!')
+        ),
+    )
+
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
@@ -57,6 +91,11 @@ if __name__ == '__main__':
 
     if 'cons' in args.tests:
         suite = test_cons()
+        logger.info(f'suite = %s',           suite.pformat())
+        logger.info(f'suite(env={{}}) = %r', suite(env={}))
+
+    if 'arithmetic' in args.tests:
+        suite = test_arithmetic(randint(1, 100), randint(1, 100))
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 

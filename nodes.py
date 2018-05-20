@@ -150,16 +150,65 @@ class Assert(Node):
     cond = property(lambda self: self.children[0])
     msg  = property(lambda self: self.children[1])
 
-class Eq(Node):
-    @debug
-    def __call__(self, env):
-        left, right = self.left(env), self.right(env)
-        left, right = left.value, right.value # unwrap
-        return Atom(left == right) # wrap
-    def __init__(self, left, right):
-        super().__init__(left, right)
-    left  = property(lambda self: self.children[0])
-    right = property(lambda self: self.children[1])
+def create_binop(name, op):
+    code = dedent(f'''
+    class {name}(Node):
+        @debug
+        def __call__(self, env):
+            left, right = self.left(env), self.right(env)
+            left, right = left.value, right.value   # unwrap
+            return Atom({op.__name__}(left, right)) # wrap
+        def __init__(self, left, right):
+            super().__init__(left, right)
+        left  = property(lambda self: self.children[0])
+        right = property(lambda self: self.children[1])
+    ''')
+    ns = {}
+    exec(code, globals(), ns)
+    return ns[name]
+
+def create_unop(name, op):
+    code = dedent(f'''
+    class {name}(Node):
+        @debug
+        def __call__(self, env):
+            arg = self.arg(env)
+            arg = arg.value   # unwrap
+            return Atom({op.__name__}(arg)) # wrap
+        def __init__(self, arg):
+            super().__init__(arg)
+        arg  = property(lambda self: self.children[0])
+    ''')
+    ns = {}
+    exec(code, globals(), ns)
+    return ns[name]
+
+from operator import pos, neg
+Pos = create_unop('Pos', pos)
+Neg = create_unop('Neg', neg)
+
+from operator import eq, ne, lt, gt, le, ge
+Eq = create_binop('Eq', eq)
+Ne = create_binop('Ne', ne)
+Lt = create_binop('Lt', lt)
+Gt = create_binop('Gt', gt)
+Le = create_binop('Le', le)
+Ge = create_binop('Ge', ge)
+
+from operator import add, sub, mul, truediv, mod, pow
+Add = create_binop('Add', add)
+Sub = create_binop('Sub', sub)
+Mul = create_binop('Mul', mul)
+Div = create_binop('Div', truediv)
+Mod = create_binop('Mod', mod)
+Pow = create_binop('Pow', pow)
+
+from operator import and_, or_, not_, xor, is_
+And = create_binop('And', and_)
+Or  = create_binop('Or',  or_)
+Not = create_binop('Not', not_)
+Xor = create_binop('Xor', xor)
+Is  = create_binop('Is',  is_)
 
 class Print(Node):
     @debug
