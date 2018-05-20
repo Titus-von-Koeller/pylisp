@@ -159,6 +159,61 @@ def test_controlflow():
         ),
     )
 
+def test_functions(n):
+    def fib(n):
+        if n == 0 or n == 1:
+            return 1
+        return fib(n-1) + fib(n-2)
+    return Suite(
+        Setq(
+            Name('fib'),
+            Lambda(
+                List('n'),
+                Suite(
+                    IfElse(
+                        Or(
+                            Eq(Var('n'), Atom(0)),
+                            Eq(Var('n'), Atom(1)),
+                        ),
+                        Atom(1),
+                        Suite(
+                            Setq(
+                                Name('rv'),
+                                Add(
+                                    Call(
+                                        Name('fib'),
+                                        Sub(Var('n'), Atom(1)),
+                                    ),
+                                    Call(
+                                        Name('fib'),
+                                        Sub(Var('n'), Atom(2)),
+                                    ),
+                                ),
+                            ),
+                            Var('rv'),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        Setq(
+            Name('rv'),
+            Call(
+                Name('fib'),
+                Atom(n),
+            ),
+        ),
+        Print(Atom(f'(fib {n}) ='), Var('rv')),
+        Assert(
+            Eq(
+                Var('rv'),
+                Atom(fib(n)),
+            ),
+            Atom(f'(fib {n}) failed!'),
+        ),
+        Print(Atom('All tests passed!')),
+    )
+
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
@@ -180,6 +235,11 @@ if __name__ == '__main__':
 
     if 'controlflow' in args.tests:
         suite = test_controlflow()
+        logger.info(f'suite = %s',           suite.pformat())
+        logger.info(f'suite(env={{}}) = %r', suite(env={}))
+
+    if 'functions' in args.tests:
+        suite = test_functions(10)
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 

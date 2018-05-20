@@ -251,9 +251,6 @@ class Nil(Node):
     value = property(lambda self: None)
 Nil = Nil()
 
-class UfuncBase(Node):
-    pass
-
 class While(Node):
     @debug
     def __call__(self, env):
@@ -282,3 +279,35 @@ class IfElse(Node):
     ifbody   = property(lambda self: self.children[1])
     elsebody = property(lambda self: self.children[2])
 
+class Call(Node):
+    @debug
+    def __call__(self, env):
+        args = [arg(env) for arg in self.args]
+        node = env[self.name.value](*args)
+        return node(env)
+    def __init__(self, name, *args):
+        super().__init__(name, *args)
+    name = property(lambda self: self.children[0])  
+    args = property(lambda self: self.children[1:])
+
+class UfuncBase(Node):
+    pass
+
+class Lambda(Node):
+    @debug
+    def __call__(self, env):
+        params, body = self.params, self.body
+        class Ufunc(UfuncBase):
+            @debug
+            def __call__(self, env):
+                args = dict(zip(params.values, self.args))
+                local_env = {**env, **args}
+                return body(local_env)
+            def __init__(self, *args):
+                super().__init__(*args)
+            args = property(lambda self: self.children)
+        return Ufunc
+    def __init__(self, params, body):
+        super().__init__(params, body)
+    params = property(lambda self: self.children[0])
+    body   = property(lambda self: self.children[1])
