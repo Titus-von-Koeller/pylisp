@@ -80,17 +80,18 @@ def test_arithmetic(x, y):
         ),
     )
 
+def fizzbuzz(n):
+    for x in range(n, 0, -1):
+        if x % 15 == 0:
+            yield 'fizzbuzz'
+        elif x % 5 == 0:
+            yield 'buzz'
+        elif x % 3 == 0:
+            yield 'fizz'
+        else:
+            yield x
+
 def test_controlflow():
-    def fizzbuzz(n):
-        for x in range(n, 0, -1):
-            if x % 15 == 0:
-                yield 'fizzbuzz'
-            elif x % 5 == 0:
-                yield 'buzz'
-            elif x % 3 == 0:
-                yield 'fizz'
-            else:
-                yield x
     return Suite(
         Setq(
             Name('x'),
@@ -263,6 +264,62 @@ def test_tco(n):
         Print(Atom('All tests passed!')),
     )
 
+def test_parser():
+    def quote(x):
+        if isinstance(x, str):
+            return f'"{x}"'
+        return repr(x)
+    code = f'''
+    (setq print-list (lambda (xs)
+        (while (<> xs nil)
+            (print (car xs))
+            (setq xs (cdr xs))
+        )
+    ))
+
+    (
+        (print "simple test")
+        (setq add (lambda (x y) (+ x y)))
+        (print "1 + 2 =" (add 1 2))
+        (assert (== (add 1 2) 3) "add 1 2) failed!")
+        (print "All tests passed!")
+    )
+    (
+        (print "hard test")
+        (setq fizzbuzz (
+            lambda (x) (
+                (setq n 0)
+                (setq rv nil)
+                (while (< n x)
+                    (setq n (+ n 1)) 
+                    (if (== (% n 15) 0)
+                        (setq rv (cons "fizzbuzz" rv))
+                        (if (== (% n 5) 0)
+                            (setq rv (cons "buzz" rv))
+                            (if (== (% n 3) 0)
+                                (setq rv (cons "fizz" rv))
+                                (setq rv (cons n rv))
+                            )
+                        )
+                    )
+                )
+                (rv)
+            )
+        ))
+        (print-list (cons "(fizzbuzz 20) =" (fizzbuzz 20)))
+        (assert 
+            (==
+                (fizzbuzz 20)
+                (list {" ".join(quote(x) for x in fizzbuzz(20))})
+            )
+            "(fizzbuzz 20) failed!"
+        )
+
+        (print "All tests passed!")
+    )
+    '''
+    return parse(code)
+
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
@@ -294,6 +351,11 @@ if __name__ == '__main__':
 
     if 'tco' in args.tests:
         suite = test_tco(40)
+        logger.info(f'suite = %s',           suite.pformat())
+        logger.info(f'suite(env={{}}) = %r', suite(env={}))
+
+    if 'parser' in args.tests:
+        suite = test_parser()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from re import compile, escape
+from decimal import Decimal
 from textwrap import indent, dedent
 from collections import defaultdict
 from functools import wraps
@@ -62,6 +64,59 @@ class Node:
         return indent(msg, prefix=pfx)
     def __call__(self, env):
         raise NotImplementedError()
+    @classmethod
+    def parse(cls, tree):
+        NUM_RE = compile(r'(?:\+|-)?\d*\.?\d*')
+        if not isinstance(tree, list):
+            if NUM_RE.fullmatch(tree):
+                return Atom(Decimal(tree))
+            if tree.startswith('"') and tree.endswith('"'):
+                return Atom(tree[1:-1])
+            if tree == 'nil':
+                return Nil
+            return Var(tree)
+        if all(isinstance(x, list) for x in tree):
+            return Suite.parse(tree)
+        if tree[0] == 'setq':
+            return Setq.parse(tree)
+        if tree[0] == 'lambda':
+            return Lambda.parse(tree)
+        comparisons = {'==': Eq, '<>': Ne, '<': Lt, '>': Gt, '<=': Le, '>=': Ge,}
+        if tree[0] in comparisons:
+            return comparisons[tree[0]].parse(tree)
+        ops = {'+': {1: Pos, 2: Add},
+               '-': {1: Neg, 2: Sub},
+               '*': {2: Mul}, '/': {2: Div}, '%': {2: Mod}, '**': {2: Pow},
+               'and': {2: And}, 'or': {2: Or}, 'not': {1: Not}, 'xor': {2: Xor}}
+        if tree[0] in ops:
+            return ops[tree[0]][len(tree[1:])].parse(tree)
+        pyfuncs = {'print': Print}
+        if tree[0] in pyfuncs:
+            return pyfuncs[tree[0]].parse(tree)
+        if tree[0] == 'assert':
+            return Assert.parse(tree)
+        if tree[0] == 'list':
+            return List.parse(tree)
+        if tree[0] == 'cons':
+            return Cons.parse(tree)
+        if tree[0] == 'car':
+            return Car.parse(tree)
+        if tree[0] == 'cdr':
+            return Cdr.parse(tree)
+        if tree[0] == 'if':
+            return IfElse.parse(tree)
+        if tree[0] == 'while':
+            return While.parse(tree)
+        if isinstance(tree[0], str):
+            if len(tree) > 1:
+                return Call.parse(tree)
+            return Var(tree[0])
+        return NotImplemented.parse(tree)
+
+class NotImplemented(Node):
+    @classmethod
+    def parse(cls, tree):
+        return cls(tree)
 
 class Comment(Node):
     @debug
@@ -75,6 +130,9 @@ class Suite(Node):
         for child in self.children:
             rv = child(env)
         return rv
+    @classmethod
+    def parse(self, tree):
+        return Suite(*[Node.parse(element) for element in tree])
 
 class Setq(Node):
     @debug
@@ -86,6 +144,10 @@ class Setq(Node):
         super().__init__(name, value)
     name  = property(lambda self: self.children[0])
     value = property(lambda self: self.children[1])
+    @classmethod
+    def parse(cls, tree):
+        _, name, value = tree
+        return cls(Name(name), Node.parse(value))
 
 class List(Node):
     @debug
@@ -99,6 +161,15 @@ class List(Node):
     def __init__(self, car, *cdr):
         super().__init__(car, *cdr)
     values = property(lambda self: self.children)
+    @classmethod
+    def parse(cls, tree):
+        _, *tree = tree
+        return cls(*[Node.parse(x) for x in tree])
+
+class Params(List):
+    @classmethod
+    def parse(cls, tree):
+        return cls(*tree)
 
 class Cons(Node):
     @debug
@@ -109,6 +180,10 @@ class Cons(Node):
         super().__init__(car, cdr)
     car = property(lambda self: self.children[0])
     cdr = property(lambda self: self.children[1])
+    @classmethod
+    def parse(cls, tree):
+        _, car, cdr = tree
+        return cls(Node.parse(car), Node.parse(cdr))
 
 class Car(Node):
     @debug
@@ -117,6 +192,10 @@ class Car(Node):
     def __init__(self, cons):
         super().__init__(cons)
     cons = property(lambda self: self.children[0])
+    @classmethod
+    def parse(cls, tree):
+        _, cons = tree
+        return cls(Node.parse(cons))
 
 class Cdr(Node):
     @debug
@@ -125,6 +204,10 @@ class Cdr(Node):
     def __init__(self, cons):
         super().__init__(cons)
     cons = property(lambda self: self.children[0])
+    @classmethod
+    def parse(cls, tree):
+        _, cons = tree
+        return cls(Node.parse(cons))
 
 class Cell(Node):
     @debug
@@ -149,6 +232,10 @@ class Assert(Node):
         super().__init__(cond, msg)
     cond = property(lambda self: self.children[0])
     msg  = property(lambda self: self.children[1])
+    @classmethod
+    def parse(cls, tree):
+        _, cond, msg = tree
+        return cls(Node.parse(cond), Node.parse(msg))
 
 def create_binop(name, op):
     code = dedent(f'''
@@ -162,6 +249,10 @@ def create_binop(name, op):
             super().__init__(left, right)
         left  = property(lambda self: self.children[0])
         right = property(lambda self: self.children[1])
+        @classmethod
+        def parse(cls, tree):
+            _, left, right = tree
+            return cls(Node.parse(left), Node.parse(right))
     ''')
     ns = {}
     exec(code, globals(), ns)
@@ -178,6 +269,10 @@ def create_unop(name, op):
         def __init__(self, arg):
             super().__init__(arg)
         arg  = property(lambda self: self.children[0])
+        @classmethod
+        def parse(cls, tree):
+            _, arg = tree
+            return cls(Node.parse(arg))
     ''')
     ns = {}
     exec(code, globals(), ns)
@@ -219,6 +314,10 @@ class Print(Node):
     def __init__(self, *args):
         super().__init__(*args)
     args = property(lambda self: self.children)
+    @classmethod
+    def parse(cls, tree):
+        _, *args = tree
+        return cls(*[Node.parse(x) for x in args])
 
 class Name(Node):
     @debug
@@ -228,11 +327,18 @@ class Name(Node):
         super().__init__(name)
     name  = property(lambda self: self.children[0])
     value = name
+    @classmethod
+    def parse(cls, tree):
+        name = tree[0] if isinstance(tree, list) else tree
+        return Name(name)
 
 class Var(Node):
     @debug
     def __call__(self, env):
-        return env[self.name]
+        try:
+            return env[self.name]
+        except KeyError as e:
+            raise ProgramError(f'unkown name {self.name!r}') from e
     def __init__(self, name):
         super().__init__(name)
     name = property(lambda self: self.children[0])
@@ -262,6 +368,12 @@ class While(Node):
         super().__init__(cond, body)
     cond = property(lambda self: self.children[0])
     body = property(lambda self: self.children[1])
+    @classmethod
+    def parse(cls, tree):
+        _, cond, *body = tree
+        if len(body) > 1:
+            return cls(Node.parse(cond), Suite.parse(body))
+        return cls(Node.parse(cond), Node.parse(*body))
 
 class IfElse(Node):
     @debug
@@ -278,17 +390,31 @@ class IfElse(Node):
     cond     = property(lambda self: self.children[0])
     ifbody   = property(lambda self: self.children[1])
     elsebody = property(lambda self: self.children[2])
+    @classmethod
+    def parse(cls, tree):
+        _, cond, ifbody, *elsebody = tree
+        if elsebody:
+            return cls(Node.parse(cond), Node.parse(ifbody), Node.parse(*elsebody))
+        return cls(Node.parse(cond), Node.parse(ifbody))
 
 class Call(Node):
     @debug
     def __call__(self, env):
         args = [arg(env) for arg in self.args]
-        node = env[self.name.value](*args)
+        try:
+            node = env[self.name.value](*args)
+        except KeyError as e:
+            raise ProgramError(f'unkown name {self.name.value!r}') from e
         return node(env)
     def __init__(self, name, *args):
         super().__init__(name, *args)
     name = property(lambda self: self.children[0])  
     args = property(lambda self: self.children[1:])
+    @classmethod
+    def parse(cls, tree):
+        name, *args = tree
+        return cls(Name(name), *[Node.parse(x) for x in args])
+
 
 class UfuncBase(Node):
     pass
@@ -311,3 +437,50 @@ class Lambda(Node):
         super().__init__(params, body)
     params = property(lambda self: self.children[0])
     body   = property(lambda self: self.children[1])
+    @classmethod
+    def parse(cls, tree):
+        _, params, body = tree
+        return cls(Params.parse(params), Node.parse(body))
+
+NAME     = '[^"() \n\t]+'
+QUOTED   = r'"(?:[^"\\]|\\.)*"'
+LPAREN   = escape('(')
+RPAREN   = escape(')')
+TOKEN    = f'({NAME}|{QUOTED}|{LPAREN}|{RPAREN})'
+TOKEN_RE = compile(TOKEN)
+
+def tokenize(s):
+    for token in TOKEN_RE.split(s):
+        if token.strip():
+            yield token
+    return
+
+def build_tree(tokens):
+    rv = []
+    current = [rv]
+    for value in tokens:
+        if value == '(':
+            t = []
+            current[-1].append(t)
+            current.append(t)
+        elif value == ')':
+            current.pop()
+        else:
+            current[-1].append(value)
+    return rv
+
+def build_nodes(tree):
+    return Node.parse(tree)
+
+def build_ast(tokens):
+    tree = build_tree(tokens)
+    logger.info('tree:\n%s', pformat(tree))
+    nodes = build_nodes(tree)
+    logger.info('nodes:\n%s', pformat(nodes))
+    return nodes
+
+def parse(s):
+    tokens = list(tokenize(s))
+    logger.info('tokens\n%s', pformat(tokens))
+    ast = build_ast(tokens)
+    return ast
