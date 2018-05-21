@@ -214,6 +214,55 @@ def test_functions(n):
         Print(Atom('All tests passed!')),
     )
 
+def test_tco(n):
+    def fact(n):
+        if n == 0:
+            return 1
+        return n * fact(n-1)
+    return Suite(
+        Setq(
+            Name('fact'),
+            Lambda(
+                List('n'),
+                Suite(
+                    IfElse(
+                        Eq(
+                            Var('n'),
+                            Atom(0),
+                        ),
+                        Atom(1),
+                        Mul(
+                            Var('n'),
+                            Call(
+                                Name('fact'),
+                                Sub(Var('n'), Atom(1)),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        Setq(
+            Name('rv'),
+            Call(
+                Name('fact'),
+                Atom(n),
+            ),
+        ),
+        Print(
+            Atom(f'(fact {n}) ='),
+            Var('rv'),
+        ),
+        Assert(
+            Eq(
+                Var('rv'),
+                Atom(fact(n)),
+            ),
+            Atom(f'(fact {n}) failed!')
+        ),
+        Print(Atom('All tests passed!')),
+    )
+
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
@@ -240,6 +289,11 @@ if __name__ == '__main__':
 
     if 'functions' in args.tests:
         suite = test_functions(10)
+        logger.info(f'suite = %s',           suite.pformat())
+        logger.info(f'suite(env={{}}) = %r', suite(env={}))
+
+    if 'tco' in args.tests:
+        suite = test_tco(40)
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
