@@ -2,10 +2,11 @@
 from re import compile, escape
 from decimal import Decimal
 from textwrap import indent, dedent
-from collections import defaultdict
+from collections import defaultdict, Iterable
 from functools import wraps
 from logging import getLogger
 from pprint import pformat
+from sys import stdin
 logger = getLogger(__name__)
 
 # NOT thread-safe!!
@@ -74,7 +75,11 @@ class Node:
                 return Atom(tree[1:-1])
             if tree == 'nil':
                 return Nil
+            if tree == 'true':
+                return True_
             return Var(tree)
+            if tree == 'false':
+                return False_
         if all(isinstance(x, list) for x in tree):
             return Suite.parse(tree)
         if tree[0] == 'setq':
@@ -90,7 +95,7 @@ class Node:
                'and': {2: And}, 'or': {2: Or}, 'not': {1: Not}, 'xor': {2: Xor}}
         if tree[0] in ops:
             return ops[tree[0]][len(tree[1:])].parse(tree)
-        pyfuncs = {'print': Print}
+        pyfuncs = {'print': Print, 'printf': Printf, 'printfs': Printfs}
         if tree[0] in pyfuncs:
             return pyfuncs[tree[0]].parse(tree)
         if tree[0] == 'assert':
@@ -107,6 +112,14 @@ class Node:
             return IfElse.parse(tree)
         if tree[0] == 'while':
             return While.parse(tree)
+        if tree[0] == 'parse':
+            return Parse.parse(tree)
+        if tree[0] == 'quoted':
+            return Atom(Node.parse(tree[1]))
+        if tree[0] == 'eval':
+            return Eval.parse(tree)
+        if tree[0] == 'read':
+            return Read.parse(tree)
         if isinstance(tree[0], str):
             if len(tree) > 1:
                 return Call.parse(tree)
@@ -305,19 +318,36 @@ Not = create_binop('Not', not_)
 Xor = create_binop('Xor', xor)
 Is  = create_binop('Is',  is_)
 
-class Print(Node):
-    @debug
-    def __call__(self, env):
-        args = [arg(env) for arg in self.args]
-        args = [arg.value for arg in args] # unwrap
-        return Atom(print(*args)) # wrap
-    def __init__(self, *args):
-        super().__init__(*args)
-    args = property(lambda self: self.children)
-    @classmethod
-    def parse(cls, tree):
-        _, *args = tree
-        return cls(*[Node.parse(x) for x in args])
+def create_pyfunc(name, func):
+    code = dedent(f'''
+    class {name}(Node):
+        @debug
+        def __call__(self, env):
+            args = [arg(env) for arg in self.args]
+            args = [arg.value for arg in args] # unwrap
+            rv = {func.__name__}(*args)
+            return Atom(rv) # wrap
+        def __init__(self, *args):
+            super().__init__(*args)
+        args = property(lambda self: self.children)
+        @classmethod
+        def parse(cls, tree):
+            _, *args = tree
+            return cls(*[Node.parse(x) for x in args])
+    ''')
+    ns = {}
+    exec(code, globals(), ns)
+    return ns[name]
+
+def printf(fmt, *args):
+    return print(fmt.format(*args), end='')
+
+def printfs(fmt, sep, *args):
+    return print(fmt.format(*args), sep=sep, end='')
+
+Print   = create_pyfunc('Print', print)
+Printf  = create_pyfunc('Printf', printf)
+Printfs = create_pyfunc('Printfs', printfs)
 
 class Name(Node):
     @debug
@@ -356,6 +386,18 @@ class Nil(Node):
         return self
     value = property(lambda self: None)
 Nil = Nil()
+
+class True_(Node):
+    def __call__(self, env):
+        return self
+    value = property(lambda self: True)
+True_ = True_()
+
+class False_(Node):
+    def __call__(self, env):
+        return self
+    value = property(lambda self: False)
+False_ = False_()
 
 class While(Node):
     @debug
@@ -442,9 +484,50 @@ class Lambda(Node):
         _, params, body = tree
         return cls(Params.parse(params), Node.parse(body))
 
-NAME     = '[^"() \n\t]+'
+class Read(Node):
+    @debug
+    def __call__(self, env):
+        line = next(stdin)
+        return Atom(line)
+    def __init__(self):
+        super().__init__()
+    @classmethod
+    def parse(cls, tree):
+        return cls()
+
+
+class Parse(Node):
+    @debug
+    def __call__(self, env):
+        expr = self.expr
+        code = expr(env).value
+        node = parse(code)
+        return Atom(node)
+    def __init__(self, expr):
+        super().__init__(expr)
+    expr = property(lambda self: self.children[0])
+    @classmethod
+    def parse(cls, tree):
+        _, expr = tree
+        return cls(Node.parse(expr))
+
+class Eval(Node):
+    @debug
+    def __call__(self, env):
+        expr = self.expr
+        node = expr(env).value
+        return node(env)
+    def __init__(self, expr):
+        super().__init__(expr)
+    expr = property(lambda self: self.children[0])
+    @classmethod
+    def parse(cls, tree):
+        _, expr = tree
+        return cls(Node.parse(expr))
+
+NAME     = '[^"\'() \n\t]+'
 QUOTED   = r'"(?:[^"\\]|\\.)*"'
-LPAREN   = escape('(')
+LPAREN   = "'?" + escape('(')
 RPAREN   = escape(')')
 TOKEN    = f'({NAME}|{QUOTED}|{LPAREN}|{RPAREN})'
 TOKEN_RE = compile(TOKEN)
@@ -463,6 +546,10 @@ def build_tree(tokens):
             t = []
             current[-1].append(t)
             current.append(t)
+        elif value == "'(":
+            t = ['quoted', []]
+            current[-1].append(t)
+            current.append(t[-1])
         elif value == ')':
             current.pop()
         else:

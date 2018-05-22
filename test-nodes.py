@@ -270,12 +270,13 @@ def test_parser():
             return f'"{x}"'
         return repr(x)
     code = f'''
-    (setq print-list (lambda (xs)
+    (setq print-list (lambda (xs) (
         (while (<> xs nil)
-            (print (car xs))
+            (printf "{{}} " (car xs))
             (setq xs (cdr xs))
         )
-    ))
+        (printf "\n")
+    )))
 
     (
         (print "simple test")
@@ -291,7 +292,7 @@ def test_parser():
                 (setq n 0)
                 (setq rv nil)
                 (while (< n x)
-                    (setq n (+ n 1)) 
+                    (setq n (+ n 1))
                     (if (== (% n 15) 0)
                         (setq rv (cons "fizzbuzz" rv))
                         (if (== (% n 5) 0)
@@ -307,7 +308,7 @@ def test_parser():
             )
         ))
         (print-list (cons "(fizzbuzz 20) =" (fizzbuzz 20)))
-        (assert 
+        (assert
             (==
                 (fizzbuzz 20)
                 (list {" ".join(quote(x) for x in fizzbuzz(20))})
@@ -317,6 +318,24 @@ def test_parser():
 
         (print "All tests passed!")
     )
+    '''
+    return parse(code)
+
+def test_repl():
+    code = '''
+    (print (parse "(+ 1 2)"))
+    
+    (setq node '(+ 1 2))
+    (print "[" (eval node) "]")
+
+    (setq name (read))
+    (printf "hello {}" name)
+
+    (while (== true true) (
+        (setq line (read))
+        (setq code (parse line))
+        (print (eval code))
+    ))
     '''
     return parse(code)
 
@@ -356,6 +375,11 @@ if __name__ == '__main__':
 
     if 'parser' in args.tests:
         suite = test_parser()
+        logger.info(f'suite = %s',           suite.pformat())
+        logger.info(f'suite(env={{}}) = %r', suite(env={}))
+
+    if 'repl' in args.tests:
+        suite = test_repl()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
