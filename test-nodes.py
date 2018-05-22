@@ -8,11 +8,11 @@ logger = getLogger(__name__)
 def test_cons():
     return Suite(
         Comment('(cons 1 (cons 2 (cons 3 nil)))'),
-        Setq(
+        Set(
             Name('x'),
             Cons(Atom(1), Cons(Atom(2), Cons(Atom(3), Nil))),
         ),
-        Setq(
+        Set(
             Name('y'),
             List(Atom(1), Atom(2), Atom(3)),
         ),
@@ -49,11 +49,11 @@ def test_cons():
 def test_arithmetic(x, y):
     return Suite(
         Comment(f'x = {x}, y = {y}'),
-        Setq(
+        Set(
             Name('x'),
             Atom(x),
         ),
-        Setq(
+        Set(
             Name('y'),
             Atom(y),
         ),
@@ -93,22 +93,22 @@ def fizzbuzz(n):
 
 def test_controlflow():
     return Suite(
-        Setq(
+        Set(
             Name('x'),
             Atom(0),
         ),
-        Setq(
+        Set(
             Name('n'),
             Atom(20),
         ),
-        Setq(
+        Set(
             Name('rv'),
             Nil,
         ),
         While(
             Lt(Var('x'), Var('n')),
             Suite(
-                Setq(
+                Set(
                     Name('x'),
                     Add(Var('x'), Atom(1))
                 ),
@@ -117,7 +117,7 @@ def test_controlflow():
                         Mod(Var('x'), Atom(15)),
                         Atom(0),
                     ),
-                    Setq(
+                    Set(
                         Name('rv'),
                         Cons(Atom('fizzbuzz'), Var('rv')),
                     ),
@@ -126,7 +126,7 @@ def test_controlflow():
                             Mod(Var('x'), Atom(5)),
                             Atom(0),
                         ),
-                        Setq(
+                        Set(
                             Name('rv'),
                             Cons(Atom('buzz'), Var('rv')),
                         ),
@@ -135,11 +135,11 @@ def test_controlflow():
                                 Mod(Var('x'), Atom(3)),
                                 Atom(0),
                             ),
-                            Setq(
+                            Set(
                                 Name('rv'),
                                 Cons(Atom('fizz'), Var('rv')),
                             ),
-                            Setq(
+                            Set(
                                 Name('rv'),
                                 Cons(Var('x'), Var('rv')),
                             ),
@@ -166,7 +166,7 @@ def test_functions(n):
             return 1
         return fib(n-1) + fib(n-2)
     return Suite(
-        Setq(
+        Set(
             Name('fib'),
             Lambda(
                 List('n'),
@@ -178,7 +178,7 @@ def test_functions(n):
                         ),
                         Atom(1),
                         Suite(
-                            Setq(
+                            Set(
                                 Name('rv'),
                                 Add(
                                     Call(
@@ -197,7 +197,7 @@ def test_functions(n):
                 ),
             ),
         ),
-        Setq(
+        Set(
             Name('rv'),
             Call(
                 Name('fib'),
@@ -221,7 +221,7 @@ def test_tco(n):
             return 1
         return n * fact(n-1)
     return Suite(
-        Setq(
+        Set(
             Name('fact'),
             Lambda(
                 List('n'),
@@ -243,7 +243,7 @@ def test_tco(n):
                 ),
             ),
         ),
-        Setq(
+        Set(
             Name('rv'),
             Call(
                 Name('fact'),
@@ -270,36 +270,36 @@ def test_parser():
             return f'"{x}"'
         return repr(x)
     code = f'''
-    (setq print-list (lambda (xs) (
+    (set print-list (lambda (xs) (
         (while (<> xs nil)
             (printf "{{}} " (car xs))
-            (setq xs (cdr xs))
+            (set xs (cdr xs))
         )
         (printf "\n")
     )))
 
     (
         (print "simple test")
-        (setq add (lambda (x y) (+ x y)))
+        (set add (lambda (x y) (+ x y)))
         (print "1 + 2 =" (add 1 2))
         (assert (== (add 1 2) 3) "add 1 2) failed!")
         (print "All tests passed!")
     )
     (
         (print "hard test")
-        (setq fizzbuzz (
+        (set fizzbuzz (
             lambda (x) (
-                (setq n 0)
-                (setq rv nil)
+                (set n 0)
+                (set rv nil)
                 (while (< n x)
-                    (setq n (+ n 1))
+                    (set n (+ n 1))
                     (if (== (% n 15) 0)
-                        (setq rv (cons "fizzbuzz" rv))
+                        (set rv (cons "fizzbuzz" rv))
                         (if (== (% n 5) 0)
-                            (setq rv (cons "buzz" rv))
+                            (set rv (cons "buzz" rv))
                             (if (== (% n 3) 0)
-                                (setq rv (cons "fizz" rv))
-                                (setq rv (cons n rv))
+                                (set rv (cons "fizz" rv))
+                                (set rv (cons n rv))
                             )
                         )
                     )
@@ -324,18 +324,49 @@ def test_parser():
 def test_repl():
     code = '''
     (print (parse "(+ 1 2)"))
-    
-    (setq node '(+ 1 2))
-    (print "[" (eval node) "]")
 
-    (setq name (read))
-    (printf "hello {}" name)
+    (set node '(+ 1 2))
+    (print "<" (eval node) ">")
 
-    (while (== true true) (
-        (setq line (read))
-        (setq code (parse line))
+    (set name (read))
+    (printf "hello, {}\n" name)
+
+    (set line nil)
+    (while (<> line "") (
+        (set line (read))
+        (set code (parse line))
+        (printf ">>> {}\n" line)
         (print (eval code))
     ))
+    '''
+    return parse(code)
+
+def test_scoping():
+    code = '''
+        (set y 10)
+        (set f (lambda (x) (
+            (printf "inside f - before - x = {:5f}, y = {:5f}\n" x y)
+            (set x 100)
+            (setg y 100)
+            (h x)
+            (printf "inside f - after  - x = {:5f}, y = {:5f}\n" x y)
+        )))
+
+        (set h (lambda (x) (
+            (set y (* y 10))
+            (g x)
+        )))
+
+        (set g (lambda (x) (
+            (printf "inside g - before - x = {:5f}, y = {:5f}\n" x y)
+            (set x 1000)
+            (set y 1000)
+            (printf "inside g - after  - x = {:5f}, y = {:5f}\n" x y)
+        )))
+        (set x 10)
+        (printf "outside  - before - x = {:5f}, y = {:5f}\n" x y)
+        (f x)
+        (printf "outside  - after  - x = {:5f}, y = {:5f}\n" x y)
     '''
     return parse(code)
 
@@ -378,8 +409,22 @@ if __name__ == '__main__':
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
+    def mock_stdin():
+        yield 'Bob'
+        yield '(+ 1 2)'
+        yield '(set x (+ 1 2))'
+        yield '(* x 10)'
+        yield ''
+    MockStdin = create_pyfunc('MockStdin', mock_stdin().__next__)
+
     if 'repl' in args.tests:
         suite = test_repl()
+        logger.info(f'suite = %s', suite.pformat())
+        env = {'--stdin': MockStdin()}
+        logger.info(f'suite(env=%r) = %r', env, suite(env=env))
+
+    if 'scoping' in args.tests:
+        suite = test_scoping()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 

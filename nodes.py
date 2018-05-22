@@ -2,7 +2,7 @@
 from re import compile, escape
 from decimal import Decimal
 from textwrap import indent, dedent
-from collections import defaultdict, Iterable
+from collections import defaultdict, Iterable, ChainMap
 from functools import wraps
 from logging import getLogger
 from pprint import pformat
@@ -82,8 +82,10 @@ class Node:
                 return False_
         if all(isinstance(x, list) for x in tree):
             return Suite.parse(tree)
-        if tree[0] == 'setq':
-            return Setq.parse(tree)
+        if tree[0] == 'set':
+            return Set.parse(tree)
+        if tree[0] == 'setg':
+            return Setg.parse(tree)
         if tree[0] == 'lambda':
             return Lambda.parse(tree)
         comparisons = {'==': Eq, '<>': Ne, '<': Lt, '>': Gt, '<=': Le, '>=': Ge,}
@@ -147,11 +149,29 @@ class Suite(Node):
     def parse(self, tree):
         return Suite(*[Node.parse(element) for element in tree])
 
-class Setq(Node):
+class Set(Node):
     @debug
     def __call__(self, env):
         name, value = self.name(env), self.value(env)
         env[name.value] = value
+        return value
+    def __init__(self, name, value):
+        super().__init__(name, value)
+    name  = property(lambda self: self.children[0])
+    value = property(lambda self: self.children[1])
+    @classmethod
+    def parse(cls, tree):
+        _, name, value = tree
+        return cls(Name(name), Node.parse(value))
+
+class Setg(Node):
+    @debug
+    def __call__(self, env):
+        name, value = self.name(env), self.value(env)
+        if isinstance(env, ChainMap):
+            env.maps[-1][name.value] = value
+        else:
+            env[name.value] = value
         return value
     def __init__(self, name, value):
         super().__init__(name, value)
@@ -320,24 +340,26 @@ Is  = create_binop('Is',  is_)
 
 def create_pyfunc(name, func):
     code = dedent(f'''
-    class {name}(Node):
-        @debug
-        def __call__(self, env):
-            args = [arg(env) for arg in self.args]
-            args = [arg.value for arg in args] # unwrap
-            rv = {func.__name__}(*args)
-            return Atom(rv) # wrap
-        def __init__(self, *args):
-            super().__init__(*args)
-        args = property(lambda self: self.children)
-        @classmethod
-        def parse(cls, tree):
-            _, *args = tree
-            return cls(*[Node.parse(x) for x in args])
+    def create_func(func):
+        class {name}(Node):
+            @debug
+            def __call__(self, env):
+                args = [arg(env) for arg in self.args]
+                args = [arg.value for arg in args] # unwrap
+                rv = func(*args)
+                return Atom(rv) # wrap
+            def __init__(self, *args):
+                super().__init__(*args)
+            args = property(lambda self: self.children)
+            @classmethod
+            def parse(cls, tree):
+                _, *args = tree
+                return cls(*[Node.parse(x) for x in args])
+        return {name}
     ''')
     ns = {}
     exec(code, globals(), ns)
-    return ns[name]
+    return ns['create_func'](func)
 
 def printf(fmt, *args):
     return print(fmt.format(*args), end='')
@@ -457,7 +479,6 @@ class Call(Node):
         name, *args = tree
         return cls(Name(name), *[Node.parse(x) for x in args])
 
-
 class UfuncBase(Node):
     pass
 
@@ -469,7 +490,10 @@ class Lambda(Node):
             @debug
             def __call__(self, env):
                 args = dict(zip(params.values, self.args))
-                local_env = {**env, **args}
+                if isinstance(env, ChainMap):
+                    local_env = ChainMap(args, env.maps[-1])
+                else:
+                    local_env = ChainMap(args, env)
                 return body(local_env)
             def __init__(self, *args):
                 super().__init__(*args)
@@ -487,6 +511,8 @@ class Lambda(Node):
 class Read(Node):
     @debug
     def __call__(self, env):
+        if '__stdin' in env:
+            return env['__stdin'](env)
         line = next(stdin)
         return Atom(line)
     def __init__(self):
@@ -494,7 +520,6 @@ class Read(Node):
     @classmethod
     def parse(cls, tree):
         return cls()
-
 
 class Parse(Node):
     @debug
