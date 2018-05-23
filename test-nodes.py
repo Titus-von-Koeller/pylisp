@@ -169,7 +169,7 @@ def test_functions(n):
         Set(
             Name('fib'),
             Lambda(
-                List('n'),
+                Params('n'),
                 Suite(
                     IfElse(
                         Or(
@@ -212,7 +212,7 @@ def test_functions(n):
             ),
             Atom(f'(fib {n}) failed!'),
         ),
-        Print(Atom('All tests passed!')),
+        Print(Atom('All functions tests passed!')),
     )
 
 def test_tco(n):
@@ -224,7 +224,7 @@ def test_tco(n):
         Set(
             Name('fact'),
             Lambda(
-                List('n'),
+                Params('n'),
                 Suite(
                     IfElse(
                         Eq(
@@ -304,7 +304,7 @@ def test_parser():
                         )
                     )
                 )
-                (rv)
+                (get rv)
             )
         ))
         (print-list (cons "(fizzbuzz 20) =" (fizzbuzz 20)))
@@ -341,53 +341,49 @@ def test_repl():
     '''
     return parse(code)
 
-# closures
-# lexical and dynamic scoping (configurable on a per-function basis)
-# functions (lambdas)
-# types: numbers, strings, bool
-# decimal arithmetic
-# quasiquoting
-# tokenizer, parser
-# repl
-
 def test_scoping():
     code = '''
         (set y 10)
         (set z 10)
 
-        (set create-fun (lambda (z) (
-            (set fun (lambda () (
-                (ret z)
+        (set create-closure-fun (lambda (z) (
+            (set closure-fun (lambda () (
+                (get z)
             )))
-            (ret fun)
         )))
 
-        (set fun1 (create-fun 10))
-        (set fun2 (create-fun 100))
+        (set fun1 (create-closure-fun 10))
+        (set fun2 (create-closure-fun 100))
         (printf "(fun1) = {}\n" (fun1))
         (printf "(fun2) = {}\n" (fun2))
 
-        (set create-fun (lambda (z) (
-            (set create-fun (lambda () (
-                (set fun (lambda () (
-                    (ret z)
+        (assert (== 10  (fun1)) "(fun1) failed!")
+        (assert (== 100 (fun2)) "(fun1) failed!")
+
+        (set create-nested-closure-fun (lambda (z) (
+            (set create-closure-fun (lambda () (
+                (set closure-fun (lambda () (
+                    (get z)
                 )))
-                (ret fun)
             )))
-            (create-fun)
+            (create-closure-fun)
         )))
 
-        (set fun1 (create-fun 10))
-        (set fun2 (create-fun 100))
+        (set fun1 (create-nested-closure-fun 10))
+        (set fun2 (create-nested-closure-fun 100))
         (printf "(fun1) = {}\n" (fun1))
         (printf "(fun2) = {}\n" (fun2))
+
+        (assert (== 10  (fun1)) "(fun1) failed!")
+        (assert (== 100 (fun2)) "(fun1) failed!")
 
         (set f (lambda (x) (
             (printf "inside f - before - x = {:5f}, y = {:5f}\n" x y)
+            (assert (and (== x 10) (== y 10)) "Scoping failed!")
             (set x 100)
             (setg y 100)
-            (h x)
             (printf "inside f - after  - x = {:5f}, y = {:5f}\n" x y)
+            (assert (and (== x 100) (== y 100)) "Scoping failed!")
         )))
 
         (set h (lambda (x) (
@@ -397,43 +393,49 @@ def test_scoping():
 
         (set g (lambda (x) (
             (printf "inside g - before - x = {:5f}, y = {:5f}\n" x y)
+            (assert (and (== x 100) (== y 100)) "Scoping failed!")
             (set x 1000)
             (set y 1000)
             (printf "inside g - after  - x = {:5f}, y = {:5f}\n" x y)
+            (assert (and (== x 1000) (== y 1000)) "Scoping failed!")
         )))
 
         (set x 10)
         (printf "outside  - before - x = {:5f}, y = {:5f}\n" x y)
+        (assert (and (== x 10) (== y 10)) "Scoping failed!")
         (f x)
         (printf "outside  - after  - x = {:5f}, y = {:5f}\n" x y)
+        (assert (and (== x 10) (== y 100)) "Scoping failed!")
+
+        (print "All scoping tests passed!")
     '''
     return parse(code)
 
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
-parser.add_argument('tests', nargs='+')
+parser.add_argument('tests', nargs='*')
 
 if __name__ == '__main__':
     args = parser.parse_args()
     basicConfig(level={2: DEBUG, 1: INFO}.get(args.verbose, ERROR))
 
-    if 'cons' in args.tests:
+    if 'cons' in args.tests or not args.tests:
         suite = test_cons()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
-    if 'arithmetic' in args.tests:
+    if 'arithmetic' in args.tests or not args.tests:
         suite = test_arithmetic(randint(1, 100), randint(1, 100))
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
-    if 'controlflow' in args.tests:
+    if 'controlflow' in args.tests or not args.tests:
         suite = test_controlflow()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
-    if 'functions' in args.tests:
+    if 'functions' in args.tests or not args.tests:
         suite = test_functions(10)
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
@@ -443,7 +445,7 @@ if __name__ == '__main__':
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
-    if 'parser' in args.tests:
+    if 'parser' in args.tests or not args.tests:
         suite = test_parser()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
@@ -456,16 +458,20 @@ if __name__ == '__main__':
         yield ''
     MockStdin = create_pyfunc('MockStdin', mock_stdin().__next__)
 
-    if 'repl' in args.tests:
+    if 'repl' in args.tests or not args.tests:
         suite = test_repl()
         logger.info(f'suite = %s', suite.pformat())
         env = {'--stdin': MockStdin()}
         logger.info(f'suite(env=%r) = %r', env, suite(env=env))
 
-    if 'scoping' in args.tests:
+    import nodes
+    # nodes.__scoping__ = nodes.Scoping.DYNAMIC
+    if 'scoping' in args.tests or not args.tests:
         suite = test_scoping()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
+
+    print('All tests passed!')
 
     if args.stats:
         print_stats()

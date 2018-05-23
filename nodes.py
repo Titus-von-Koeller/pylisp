@@ -6,6 +6,7 @@ from collections import defaultdict, Iterable, ChainMap
 from functools import wraps
 from logging import getLogger
 from pprint import pformat
+from enum import Enum, auto
 from sys import stdin
 logger = getLogger(__name__)
 
@@ -82,14 +83,14 @@ class Node:
                 return False_
         if all(isinstance(x, list) for x in tree):
             return Suite.parse(tree)
-        if len(tree) == 1:
-            return Call.parse(tree)
         if tree[0] == 'set':
             return Set.parse(tree)
         if tree[0] == 'setg':
             return Setg.parse(tree)
-        if tree[0] == 'ret':
-            return Ret.parse(tree)
+        if tree[0] == 'setc':
+            return Setc.parse(tree)
+        if tree[0] == 'get':
+            return Get.parse(tree)
         if tree[0] == 'lambda':
             return Lambda.parse(tree)
         comparisons = {'==': Eq, '<>': Ne, '<': Lt, '>': Gt, '<=': Le, '>=': Ge,}
@@ -126,6 +127,8 @@ class Node:
             return Eval.parse(tree)
         if tree[0] == 'read':
             return Read.parse(tree)
+        if len(tree) == 1:
+            return Call.parse(tree)
         if isinstance(tree[0], str):
             if len(tree) > 1:
                 return Call.parse(tree)
@@ -186,7 +189,26 @@ class Setg(Node):
         _, name, value = tree
         return cls(Name(name), Node.parse(value))
 
-class Ret(Node):
+class Setc(Node):
+    @debug
+    def __call__(self, env):
+        name, value = self.name(env), self.value(env)
+        if isinstance(env, ChainMap):
+            env.maps[1][name.value] = value
+        else:
+            env[name.value] = value
+        return value
+    def __init__(self, name, value):
+        super().__init__(name, value)
+    name  = property(lambda self: self.children[0])
+    value = property(lambda self: self.children[1])
+    @classmethod
+    def parse(cls, tree):
+        _, name, value = tree
+        return cls(Name(name), Node.parse(value))
+
+class Get(Node):
+    @debug
     def __call__(self, env):
         return env[self.name.value]
     def __init__(self, name):
@@ -411,7 +433,7 @@ class Var(Node):
         try:
             return env[self.name](env)
         except KeyError as e:
-            raise ProgramError(f'unkown name {self.name!r}') from e
+            raise ProgramError(f'unknown name {self.name!r}') from e
     def __init__(self, name):
         super().__init__(name)
     name = property(lambda self: self.children[0])
@@ -489,11 +511,11 @@ class Call(Node):
         try:
             node = env[self.name.value](*args)
         except KeyError as e:
-            raise ProgramError(f'unkown name {self.name.value!r}') from e
+            raise ProgramError(f'unknown name {self.name.value!r}') from e
         return node(env)
     def __init__(self, name, *args):
         super().__init__(name, *args)
-    name = property(lambda self: self.children[0])  
+    name = property(lambda self: self.children[0])
     args = property(lambda self: self.children[1:])
     @classmethod
     def parse(cls, tree):
@@ -503,22 +525,28 @@ class Call(Node):
 class UfuncBase(Node):
     pass
 
+class Scoping(Enum):
+    DYNAMIC = auto()
+    LEXICAL = auto()
+
+__scoping__ = Scoping.LEXICAL
+
 class Lambda(Node):
     @debug
     def __call__(self, env):
         params, body = self.params, self.body
         if isinstance(env, ChainMap):
-            closure = env.maps[:-1]
+            closures = env.maps[:-1]
         else:
-            closure = [{}]
+            closures = []
         class Ufunc(UfuncBase):
             @debug
             def __call__(self, env):
                 args = dict(zip(params.value, self.args))
-                if isinstance(env, ChainMap):
-                    local_env = ChainMap(args, *closure, env.maps[-1])
+                if isinstance(env, ChainMap) and __scoping__ is Scoping.LEXICAL:
+                    local_env = ChainMap(args, *closures, env.maps[-1])
                 else:
-                    local_env = ChainMap(args, *closure, env)
+                    local_env = ChainMap(args, *closures, env)
                 return body(local_env)
             def __init__(self, *args):
                 super().__init__(*args)
@@ -537,8 +565,8 @@ class Lambda(Node):
 class Read(Node):
     @debug
     def __call__(self, env):
-        if '__stdin' in env:
-            return env['__stdin'](env)
+        if '--stdin' in env:
+            return env['--stdin'](env)
         line = next(stdin)
         return Atom(line)
     def __init__(self):
