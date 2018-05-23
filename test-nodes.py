@@ -341,9 +341,47 @@ def test_repl():
     '''
     return parse(code)
 
+# closures
+# lexical and dynamic scoping (configurable on a per-function basis)
+# functions (lambdas)
+# types: numbers, strings, bool
+# decimal arithmetic
+# quasiquoting
+# tokenizer, parser
+# repl
+
 def test_scoping():
     code = '''
         (set y 10)
+        (set z 10)
+
+        (set create-fun (lambda (z) (
+            (set fun (lambda () (
+                (ret z)
+            )))
+            (ret fun)
+        )))
+
+        (set fun1 (create-fun 10))
+        (set fun2 (create-fun 100))
+        (printf "(fun1) = {}\n" (fun1))
+        (printf "(fun2) = {}\n" (fun2))
+
+        (set create-fun (lambda (z) (
+            (set create-fun (lambda () (
+                (set fun (lambda () (
+                    (ret z)
+                )))
+                (ret fun)
+            )))
+            (create-fun)
+        )))
+
+        (set fun1 (create-fun 10))
+        (set fun2 (create-fun 100))
+        (printf "(fun1) = {}\n" (fun1))
+        (printf "(fun2) = {}\n" (fun2))
+
         (set f (lambda (x) (
             (printf "inside f - before - x = {:5f}, y = {:5f}\n" x y)
             (set x 100)
@@ -363,6 +401,7 @@ def test_scoping():
             (set y 1000)
             (printf "inside g - after  - x = {:5f}, y = {:5f}\n" x y)
         )))
+
         (set x 10)
         (printf "outside  - before - x = {:5f}, y = {:5f}\n" x y)
         (f x)

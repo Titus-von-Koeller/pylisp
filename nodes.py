@@ -82,10 +82,14 @@ class Node:
                 return False_
         if all(isinstance(x, list) for x in tree):
             return Suite.parse(tree)
+        if len(tree) == 1:
+            return Call.parse(tree)
         if tree[0] == 'set':
             return Set.parse(tree)
         if tree[0] == 'setg':
             return Setg.parse(tree)
+        if tree[0] == 'ret':
+            return Ret.parse(tree)
         if tree[0] == 'lambda':
             return Lambda.parse(tree)
         comparisons = {'==': Eq, '<>': Ne, '<': Lt, '>': Gt, '<=': Le, '>=': Ge,}
@@ -182,6 +186,17 @@ class Setg(Node):
         _, name, value = tree
         return cls(Name(name), Node.parse(value))
 
+class Ret(Node):
+    def __call__(self, env):
+        return env[self.name.value]
+    def __init__(self, name):
+        super().__init__(name)
+    name = property(lambda self: self.children[0])
+    @classmethod
+    def parse(cls, tree):
+        _, name = tree
+        return cls(Name(name))
+
 class List(Node):
     @debug
     def __call__(self, env):
@@ -199,7 +214,13 @@ class List(Node):
         _, *tree = tree
         return cls(*[Node.parse(x) for x in tree])
 
-class Params(List):
+class Params(Node):
+    def __call__(self, env):
+        return self
+    def __init__(self, *params):
+       super().__init__(*params)
+    params = property(lambda self: self.children)
+    value  = property(lambda self: self.params)
     @classmethod
     def parse(cls, tree):
         return cls(*tree)
@@ -388,7 +409,7 @@ class Var(Node):
     @debug
     def __call__(self, env):
         try:
-            return env[self.name]
+            return env[self.name](env)
         except KeyError as e:
             raise ProgramError(f'unkown name {self.name!r}') from e
     def __init__(self, name):
@@ -486,18 +507,23 @@ class Lambda(Node):
     @debug
     def __call__(self, env):
         params, body = self.params, self.body
+        if isinstance(env, ChainMap):
+            closure = env.maps[:-1]
+        else:
+            closure = [{}]
         class Ufunc(UfuncBase):
             @debug
             def __call__(self, env):
-                args = dict(zip(params.values, self.args))
+                args = dict(zip(params.value, self.args))
                 if isinstance(env, ChainMap):
-                    local_env = ChainMap(args, env.maps[-1])
+                    local_env = ChainMap(args, *closure, env.maps[-1])
                 else:
-                    local_env = ChainMap(args, env)
+                    local_env = ChainMap(args, *closure, env)
                 return body(local_env)
             def __init__(self, *args):
                 super().__init__(*args)
-            args = property(lambda self: self.children)
+            args  = property(lambda self: self.children)
+            value = property(lambda self: self)
         return Ufunc
     def __init__(self, params, body):
         super().__init__(params, body)
