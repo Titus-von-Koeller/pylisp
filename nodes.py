@@ -66,6 +66,8 @@ class Node:
         return indent(msg, prefix=pfx)
     def __call__(self, env):
         raise NotImplementedError()
+    def __iter__(self):
+        yield Missing(self)
     @classmethod
     def parse(cls, tree):
         NUM_RE = compile(r'(?:\+|-)?\d*\.?\d*')
@@ -144,6 +146,8 @@ class Comment(Node):
     @debug
     def __call__(self, env):
         return Nil
+    def __iter__(self):
+        yield Noop()
 
 class Suite(Node):
     @debug
@@ -155,6 +159,9 @@ class Suite(Node):
     @classmethod
     def parse(self, tree):
         return Suite(*[Node.parse(element) for element in tree])
+    def __iter__(self):
+        for child in self.children:
+            yield from child
 
 class Set(Node):
     @debug
@@ -398,6 +405,8 @@ def create_pyfunc(name, func):
             def parse(cls, tree):
                 _, *args = tree
                 return cls(*[Node.parse(x) for x in args])
+            def __iter__(self):
+                yield CallPyFunc(func, *self.args)
         return {name}
     ''')
     ns = {}
@@ -603,6 +612,33 @@ class Eval(Node):
     def parse(cls, tree):
         _, expr = tree
         return cls(Node.parse(expr))
+
+class Inst:
+    def __init__(self, *children):
+        self.children = children
+    def __repr__(self):
+        return f'{type(self).__name__}({", ".join(repr(x) for x in self.children)})'
+
+class Noop(Inst):
+    pass
+
+class Missing(Inst):
+    def __init__(self, node):
+        super().__init__(node)
+
+class CallPyFunc(Inst):
+    def __init__(self, func, *args):
+        super().__init__(func, *args)
+    func = property(lambda self: self.children[0])
+    args = property(lambda self: self.children[1:])
+    def __call__(self):
+        self.func(*[arg.value for arg in self.args])
+
+def eval(insts, env=None):
+    if env is None:
+        env = {}
+    for inst in insts:
+        inst()
 
 NAME     = '[^"\'() \n\t]+'
 QUOTED   = r'"(?:[^"\\]|\\.)*"'

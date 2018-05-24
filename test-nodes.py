@@ -411,6 +411,15 @@ def test_scoping():
     '''
     return parse(code)
 
+def test_bytecode():
+    code = '''
+        (print "Bytecode test.")
+        (set x (+ 1 1))
+        (set x (* x 10))
+        (printf "x = {}" x)
+    '''
+    return parse(code)
+
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
@@ -470,6 +479,12 @@ if __name__ == '__main__':
         suite = test_scoping()
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
+
+    if 'bytecode' in args.tests or not args.tests:
+        suite = test_bytecode()
+        logger.info(f'suite = %s',           suite.pformat())
+        logger.info('iter(suite):\n%s', '\n'.join('\t' + repr(x) for x in suite))
+        logger.info('eval(suite, env={}) = %r', eval(suite, env={}))
 
     print('All tests passed!')
 
