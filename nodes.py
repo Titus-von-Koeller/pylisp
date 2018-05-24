@@ -620,25 +620,96 @@ class Inst:
         return f'{type(self).__name__}({", ".join(repr(x) for x in self.children)})'
 
 class Noop(Inst):
-    pass
+    def __call__(self):
+        pass
 
 class Missing(Inst):
     def __init__(self, node):
         super().__init__(node)
 
 class CallPyFunc(Inst):
-    def __init__(self, func, *args):
-        super().__init__(func, *args)
+    def __init__(self, func, args):
+        super().__init__(func, args)
     func = property(lambda self: self.children[0])
-    args = property(lambda self: self.children[1:])
-    def __call__(self):
-        self.func(*[arg.value for arg in self.args])
+    args = property(lambda self: self.children[1])
+    def __call__(self, frames):
+        args = [frames[-1].pop() for _ in range(self.args)]
+        args = [arg.value for arg in args] # unwrap
+        rv = self.func(*args)
+        rv = Atom(rv) # wrap
+        frames[-1].push(rv)
+
+class Halt(Inst):
+    def __init__(self, catch_fire=False):
+        super().__init__(catch_fire)
+    catch_fire = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        frames.clear()
+
+class PushImm(Inst):
+    def __init__(self, value):
+        super().__init__(value)
+    value = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        frames[-1].push(self.value)
+
+class PushVar(Inst):
+    def __init__(self, name):
+        super().__init__(name)
+    name = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        frames[-1].push(frames[-1].env[self.name])
+
+class Frame:
+    def __init__(self, insts, pc=0, stack=None, env=None):
+        self.insts = insts
+        self.pc = pc
+        if stack is None:
+            stack = []
+        self.stack = stack
+        if env is None:
+            env = {}
+        self.env = env
+    def __iter__(self):
+        self.pc = 0
+        return self
+    def __next__(self):
+        if self.pc is None or not (0 <= self.pc < len(self.insts)):
+            raise StopIteration()
+        inst = self.insts[self.pc]
+        self.pc += 1
+        return inst
+    def push(self, value):
+        self.stack.append(value)
+    def pop(self):
+        return self.stack.pop()
 
 def eval(insts, env=None):
     if env is None:
         env = {}
-    for inst in insts:
-        inst()
+
+    frames = [Frame(insts, env=env)]
+    while frames:
+        try:
+            inst = next(frames[-1])
+        except StopIteration:
+            break
+        inst(frames)
+
+insts = [
+    # PushImm(Atom("hello world")),
+    PushImm(Atom(1)),
+    PushImm(Atom(1)),
+    CallPyFunc(add, 2),
+    PushVar('msg'),
+    CallPyFunc(print, 2),
+    Halt(),
+    PushImm(Atom("goodbye")),
+    CallPyFunc(print, 1),
+]
+eval(insts, {'msg': Atom('1 + 1 =')})
+
+from sys import exit; exit()
 
 NAME     = '[^"\'() \n\t]+'
 QUOTED   = r'"(?:[^"\\]|\\.)*"'
