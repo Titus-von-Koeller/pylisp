@@ -660,9 +660,73 @@ class PushVar(Inst):
     def __call__(self, frames):
         frames[-1].push(frames[-1].env[self.name])
 
+class PopVar(Inst):
+    def __init__(self, name):
+        super().__init__(name)
+    name = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        frames[-1].env[self.name] = frames[-1].pop()
+
+class Label(Inst):
+    def __init__(self, name):
+        super().__init__(name)
+    name = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        pass
+
+class JumpAlways(Inst):
+    def __init__(self, label):
+        super().__init__(label)
+    label = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        frames[-1].jump(self.label)
+
+class JumpIfTrue(Inst):
+    def __init__(self, label):
+        super().__init__(label)
+    label = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        val = frames[-1].pop()
+        if val.value:
+            frames[-1].jump(self.label)
+
+class PushFunc(Inst):
+    def __init__(self, insts, names=(), pc=0, stack=None, env=None):
+        super().__init__(insts, names, pc, stack, env)
+    insts = property(lambda self: self.children[0])
+    names = property(lambda self: self.children[1])
+    pc    = property(lambda self: self.children[2])
+    stack = property(lambda self: self.children[3])
+    env   = property(lambda self: self.children[4])
+    def __call__(self, frames):
+        local_env = {}
+        for n in self.names:
+            local_env[n] = frames[-1].pop()
+        outside_env = frames[-1].env
+        if isinstance(outside_env, ChainMap):
+            env = ChainMap(self.env or {}, local_env, outside_env.maps[-1])
+        else:
+            env = ChainMap(self.env or {}, local_env, outside_env)
+        frame = Frame(self.insts, self.pc, self.stack, env)
+        frames.append(frame)
+
+class PopFunc(Inst):
+    def __init__(self, name=None):
+        super().__init__(name)
+    name = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        if self.name is not None:
+            rv = frames[-1].env[self.name]
+        else:
+            rv = Nil
+        frames.pop()
+        if frames: frames[-1].push(rv)
+
 class Frame:
     def __init__(self, insts, pc=0, stack=None, env=None):
         self.insts = insts
+        self.labels = {inst.name: idx for idx, inst in enumerate(insts)
+                       if isinstance(inst, Label)}
         self.pc = pc
         if stack is None:
             stack = []
@@ -683,6 +747,8 @@ class Frame:
         self.stack.append(value)
     def pop(self):
         return self.stack.pop()
+    def jump(self, label):
+        self.pc = self.labels[label]
 
 def eval(insts, env=None):
     if env is None:
@@ -696,13 +762,78 @@ def eval(insts, env=None):
             break
         inst(frames)
 
+func_insts = [
+    # print('outisde', 'before', x)
+    PushVar('x'),
+    PushImm(Atom('before')),
+    PushImm(Atom('inside')),
+    CallPyFunc(print, 3),
+    # x = x * 10
+    PushVar('x'),
+    PushImm(Atom(10)),
+    CallPyFunc(mul, 2),
+    PopVar('x'),
+    # print('inside', 'after', x)
+    PushVar('x'),
+    PushImm(Atom('after')),
+    PushImm(Atom('inside')),
+    CallPyFunc(print, 3),
+    PopFunc(),
+]
+
 insts = [
-    # PushImm(Atom("hello world")),
+    # x = 0
+    PushImm(Atom(1)),
+    PopVar('x'),
+    # print('outisde', 'before', x)
+    PushVar('x'),
+    PushImm(Atom('before')),
+    PushImm(Atom('outside')),
+    CallPyFunc(print, 3),
+    # f(x * 10)
+    PushImm(Atom(10)),
+    PushVar('x'),
+    CallPyFunc(mul, 2),
+    PushFunc(func_insts, ['x']),
+    # print('inside', 'after', x)
+    PushVar('x'),
+    PushImm(Atom('after')),
+    PushImm(Atom('outside')),
+    CallPyFunc(print, 3),
+]
+[
+    # x = 0
+    PushImm(Atom(0)),
+    PopVar('x'), 
+
+    # while x < -1:
+    Label('loop-start'),
+    PushVar('x'),
+    PushImm(Atom(10)),
+    CallPyFunc(lt, 2),
+    JumpIfTrue('loop-end'),
+
+    # print('x =', x)
+    PushVar('x'),
+    PushImm(Atom('x =')),
+    CallPyFunc(print, 2),
+
+    PushImm(Atom("hello world")),
+    CallPyFunc(print, 1),
     PushImm(Atom(1)),
     PushImm(Atom(1)),
     CallPyFunc(add, 2),
     PushVar('msg'),
     CallPyFunc(print, 2),
+
+    # x = x + 1
+    PushVar('x'),
+    PushImm(Atom(1)),
+    CallPyFunc(add, 2),
+    PopVar('x'),
+    JumpAlways('loop-start'),
+    Label('loop-end'),
+
     Halt(),
     PushImm(Atom("goodbye")),
     CallPyFunc(print, 1),
