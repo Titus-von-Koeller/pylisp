@@ -420,6 +420,87 @@ def test_bytecode():
     '''
     return parse(code)
 
+def test_eval():
+    insts = [
+        # x = 0
+        PushImm(Atom(0)),
+        PopVar('x'),
+
+        # while x < 3:
+        Label('loop-start'),
+        PushVar('x'),
+        PushImm(Atom(3)),
+        CallPyFunc(lt, 2),
+        JumpIfTrue('loop-end'),
+
+        # print('x =', x)
+        PushVar('x'),
+        PushImm(Atom('x =')),
+        CallPyFunc(print, 2),
+
+        PushImm(Atom("hello world")),
+        CallPyFunc(print, 1),
+        PushImm(Atom(1)),
+        PushImm(Atom(1)),
+        CallPyFunc(add, 2),
+        PushVar('msg'),
+        CallPyFunc(print, 2),
+
+        # x = x + 1
+        PushVar('x'),
+        PushImm(Atom(1)),
+        CallPyFunc(add, 2),
+        PopVar('x'),
+        JumpAlways('loop-start'),
+        Label('loop-end'),
+
+        Halt(),
+        PushImm(Atom("goodbye")),
+        CallPyFunc(print, 1),
+    ]
+    eval(insts, {'msg': Atom('1 + 1 =')})
+
+    func_insts = [
+        # print('inside', 'before', x)
+        PushVar('x'),
+        PushImm(Atom('before')),
+        PushImm(Atom('inside')),
+        CallPyFunc(print, 3),
+        # x = x * 10
+        PushVar('x'),
+        PushImm(Atom(10)),
+        CallPyFunc(mul, 2),
+        PopVar('x'),
+        # print('inside', 'after', x)
+        PushVar('x'),
+        PushImm(Atom('after')),
+        PushImm(Atom('inside')),
+        CallPyFunc(print, 3),
+        PopFunc(),
+    ]
+    insts = [
+        # x = 0
+        PushImm(Atom(1)),
+        PopVar('x'),
+        # print('outside', 'before', x)
+        PushVar('x'),
+        PushImm(Atom('before')),
+        PushImm(Atom('outside')),
+        CallPyFunc(print, 3),
+        # f(x * 10)
+        PushImm(Atom(10)),
+        PushVar('x'),
+        CallPyFunc(mul, 2),
+        PushFunc(func_insts, ['x']),
+        # print('outside', 'after', x)
+        PushVar('x'),
+        PushImm(Atom('after')),
+        PushImm(Atom('outside')),
+        CallPyFunc(print, 3),
+        Halt(),
+    ]
+    eval(insts)
+
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
@@ -485,6 +566,9 @@ if __name__ == '__main__':
         logger.info(f'suite = %s',           suite.pformat())
         logger.info('iter(suite):\n%s', '\n'.join('\t' + repr(x) for x in suite))
         logger.info('eval(suite, env={}) = %r', eval(suite, env={}))
+
+    if 'eval' in args.tests or not args.tests:
+        test_eval()
 
     print('All tests passed!')
 

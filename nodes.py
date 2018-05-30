@@ -699,14 +699,17 @@ class PushFunc(Inst):
     stack = property(lambda self: self.children[3])
     env   = property(lambda self: self.children[4])
     def __call__(self, frames):
-        local_env = {}
+        if self.env is None:
+            local_env = {}
+        else:
+            local_env = self.env
         for n in self.names:
             local_env[n] = frames[-1].pop()
-        outside_env = frames[-1].env
-        if isinstance(outside_env, ChainMap):
-            env = ChainMap(self.env or {}, local_env, outside_env.maps[-1])
+        outer_env = frames[-1].env
+        if isinstance(outer_env, ChainMap):
+            env = ChainMap(local_env, outer_env.maps[-1])
         else:
-            env = ChainMap(self.env or {}, local_env, outside_env)
+            env = ChainMap(local_env, outer_env)
         frame = Frame(self.insts, self.pc, self.stack, env)
         frames.append(frame)
 
@@ -761,86 +764,6 @@ def eval(insts, env=None):
         except StopIteration:
             break
         inst(frames)
-
-func_insts = [
-    # print('outisde', 'before', x)
-    PushVar('x'),
-    PushImm(Atom('before')),
-    PushImm(Atom('inside')),
-    CallPyFunc(print, 3),
-    # x = x * 10
-    PushVar('x'),
-    PushImm(Atom(10)),
-    CallPyFunc(mul, 2),
-    PopVar('x'),
-    # print('inside', 'after', x)
-    PushVar('x'),
-    PushImm(Atom('after')),
-    PushImm(Atom('inside')),
-    CallPyFunc(print, 3),
-    PopFunc(),
-]
-
-insts = [
-    # x = 0
-    PushImm(Atom(1)),
-    PopVar('x'),
-    # print('outisde', 'before', x)
-    PushVar('x'),
-    PushImm(Atom('before')),
-    PushImm(Atom('outside')),
-    CallPyFunc(print, 3),
-    # f(x * 10)
-    PushImm(Atom(10)),
-    PushVar('x'),
-    CallPyFunc(mul, 2),
-    PushFunc(func_insts, ['x']),
-    # print('inside', 'after', x)
-    PushVar('x'),
-    PushImm(Atom('after')),
-    PushImm(Atom('outside')),
-    CallPyFunc(print, 3),
-]
-[
-    # x = 0
-    PushImm(Atom(0)),
-    PopVar('x'), 
-
-    # while x < -1:
-    Label('loop-start'),
-    PushVar('x'),
-    PushImm(Atom(10)),
-    CallPyFunc(lt, 2),
-    JumpIfTrue('loop-end'),
-
-    # print('x =', x)
-    PushVar('x'),
-    PushImm(Atom('x =')),
-    CallPyFunc(print, 2),
-
-    PushImm(Atom("hello world")),
-    CallPyFunc(print, 1),
-    PushImm(Atom(1)),
-    PushImm(Atom(1)),
-    CallPyFunc(add, 2),
-    PushVar('msg'),
-    CallPyFunc(print, 2),
-
-    # x = x + 1
-    PushVar('x'),
-    PushImm(Atom(1)),
-    CallPyFunc(add, 2),
-    PopVar('x'),
-    JumpAlways('loop-start'),
-    Label('loop-end'),
-
-    Halt(),
-    PushImm(Atom("goodbye")),
-    CallPyFunc(print, 1),
-]
-eval(insts, {'msg': Atom('1 + 1 =')})
-
-from sys import exit; exit()
 
 NAME     = '[^"\'() \n\t]+'
 QUOTED   = r'"(?:[^"\\]|\\.)*"'
