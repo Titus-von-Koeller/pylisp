@@ -459,7 +459,6 @@ def test_eval():
         CallPyFunc(print, 1),
     ]
     eval(insts, {'msg': Atom('1 + 1 =')})
-
     func_insts = [
         # print('inside', 'before', x)
         PushVar('x'),
@@ -491,7 +490,7 @@ def test_eval():
         PushImm(Atom(10)),
         PushVar('x'),
         CallPyFunc(mul, 2),
-        PushFunc(func_insts, ['x']),
+        PushRawFunc(func_insts, ['x']),
         # print('outside', 'after', x)
         PushVar('x'),
         PushImm(Atom('after')),
@@ -500,6 +499,53 @@ def test_eval():
         Halt(),
     ]
     eval(insts)
+
+def test_eval2():
+    code = r'''
+        (print "Bytecode test.")
+        (set x 10)
+        (while (> x 0) (
+            (set y (* x 10))
+            (printf "x = {}, y = {}\n" x y)
+            (set x (- x 1))
+        ))
+
+        (print "Collatz Conjecture")
+        (set f (lambda (n) (
+            (while (<> n 1) (
+                (printf "{} " n)
+                (if (% n 2)
+                    (set n (+ (* 3 n) 1))
+                    (set n (/ n 2))
+                )
+            ))
+            (printf "{}\n" n)
+        )))
+
+        (printf "(collatz 12) -> ")
+        (f 12)
+        (printf "(collatz 19) -> ")
+        (f 19)
+    '''
+    print(' Step 1: Source Code '.center(60, '='))
+    print(code)
+    print('\n')
+    print(' Step 2: Parse Into AST '.center(60, '='))
+    suite = parse(code)
+    print(suite.pformat())
+    print('\n')
+    print(' Step 3: "Compile" Into Bytecode '.center(60, '='))
+    for bytecode in suite:
+        print(bytecode)
+    print('\n')
+    print(' Step 4a: Evaluate Without Bytecode '.center(60, '='))
+    suite(env={})
+    print('\n')
+    print(' Step 4b: Evaluate Using Bytecode '.center(60, '='))
+    eval(list(suite))
+    print('\n')
+    print('=' * 60)
+
 
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
@@ -569,6 +615,9 @@ if __name__ == '__main__':
 
     if 'eval' in args.tests or not args.tests:
         test_eval()
+
+    if 'eval2' in args.tests or not args.tests:
+        test_eval2()
 
     print('All tests passed!')
 

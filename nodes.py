@@ -6,6 +6,7 @@ from collections import defaultdict, Iterable, ChainMap
 from functools import wraps
 from logging import getLogger
 from pprint import pformat
+from ast import literal_eval
 from enum import Enum, auto
 from sys import stdin
 logger = getLogger(__name__)
@@ -75,7 +76,7 @@ class Node:
             if NUM_RE.fullmatch(tree):
                 return Atom(Decimal(tree))
             if tree.startswith('"') and tree.endswith('"'):
-                return Atom(tree[1:-1])
+                return Atom(literal_eval(tree))
             if tree == 'nil':
                 return Nil
             if tree == 'true':
@@ -177,6 +178,10 @@ class Set(Node):
     def parse(cls, tree):
         _, name, value = tree
         return cls(Name(name), Node.parse(value))
+    def __iter__(self):
+        yield from self.value
+        yield PopVar(self.name.value)
+
 
 class Setg(Node):
     @debug
@@ -322,44 +327,55 @@ class Assert(Node):
 
 def create_binop(name, op):
     code = dedent(f'''
-    class {name}(Node):
-        @debug
-        def __call__(self, env):
-            left, right = self.left(env), self.right(env)
-            left, right = left.value, right.value   # unwrap
-            return Atom({op.__name__}(left, right)) # wrap
-        def __init__(self, left, right):
-            super().__init__(left, right)
-        left  = property(lambda self: self.children[0])
-        right = property(lambda self: self.children[1])
-        @classmethod
-        def parse(cls, tree):
-            _, left, right = tree
-            return cls(Node.parse(left), Node.parse(right))
+    def create_op(op):
+        class {name}(Node):
+            @debug
+            def __call__(self, env):
+                left, right = self.left(env), self.right(env)
+                left, right = left.value, right.value   # unwrap
+                return Atom(op(left, right)) # wrap
+            def __init__(self, left, right):
+                super().__init__(left, right)
+            left  = property(lambda self: self.children[0])
+            right = property(lambda self: self.children[1])
+            @classmethod
+            def parse(cls, tree):
+                _, left, right = tree
+                return cls(Node.parse(left), Node.parse(right))
+            def __iter__(self):
+                yield from self.right
+                yield from self.left
+                yield CallPyFunc(op, 2)
+        return {name}
     ''')
     ns = {}
     exec(code, globals(), ns)
-    return ns[name]
+    return ns['create_op'](op)
 
 def create_unop(name, op):
     code = dedent(f'''
-    class {name}(Node):
-        @debug
-        def __call__(self, env):
-            arg = self.arg(env)
-            arg = arg.value   # unwrap
-            return Atom({op.__name__}(arg)) # wrap
-        def __init__(self, arg):
-            super().__init__(arg)
-        arg  = property(lambda self: self.children[0])
-        @classmethod
-        def parse(cls, tree):
-            _, arg = tree
-            return cls(Node.parse(arg))
+    def create_op(op):
+        class {name}(Node):
+            @debug
+            def __call__(self, env):
+                arg = self.arg(env)
+                arg = arg.value   # unwrap
+                return Atom(op(arg)) # wrap
+            def __init__(self, arg):
+                super().__init__(arg)
+            arg  = property(lambda self: self.children[0])
+            @classmethod
+            def parse(cls, tree):
+                _, arg = tree
+                return cls(Node.parse(arg))
+            def __iter__(self):
+                yield from self.arg
+                yield CallPyFunc(op)
+        return {name}
     ''')
     ns = {}
     exec(code, globals(), ns)
-    return ns[name]
+    return ns['create_op'](op)
 
 from operator import pos, neg
 Pos = create_unop('Pos', pos)
@@ -406,7 +422,9 @@ def create_pyfunc(name, func):
                 _, *args = tree
                 return cls(*[Node.parse(x) for x in args])
             def __iter__(self):
-                yield CallPyFunc(func, *self.args)
+                for arg in reversed(self.args):
+                    yield from arg
+                yield CallPyFunc(func, len(self.args))
         return {name}
     ''')
     ns = {}
@@ -446,6 +464,8 @@ class Var(Node):
     def __init__(self, name):
         super().__init__(name)
     name = property(lambda self: self.children[0])
+    def __iter__(self):
+        yield PushVar(self.name)
 
 class Atom(Node):
     @debug
@@ -454,6 +474,8 @@ class Atom(Node):
     def __init__(self, value):
         super().__init__(value)
     value = property(lambda self: self.children[0])
+    def __iter__(self):
+        yield PushImm(self)
 
 class Nil(Node):
     def __call__(self, env):
@@ -490,7 +512,14 @@ class While(Node):
         if len(body) > 1:
             return cls(Node.parse(cond), Suite.parse(body))
         return cls(Node.parse(cond), Node.parse(*body))
-
+    def __iter__(self):
+        start, end = f'loop-start-{id(self)}', f'loop-end-{id(self)}'
+        yield Label(start)
+        yield from self.cond
+        yield JumpIfFalse(end)
+        yield from self.body
+        yield JumpAlways(start)
+        yield Label(end)
 class IfElse(Node):
     @debug
     def __call__(self, env):
@@ -512,6 +541,21 @@ class IfElse(Node):
         if elsebody:
             return cls(Node.parse(cond), Node.parse(ifbody), Node.parse(*elsebody))
         return cls(Node.parse(cond), Node.parse(ifbody))
+    def __iter__(self):
+        ifbody, elsebody, end = f'ifbody-{id(self)}', f'elsebody-{id(self)}', f'end-{id(self)}',
+        yield from self.cond
+        if self.elsebody:
+            yield JumpIfFalse(elsebody)
+        else:
+            yield JumpIfFalse(end)
+        yield Label(ifbody)
+        yield from self.ifbody
+        if self.elsebody:
+            yield JumpAlways(end)
+            yield Label(elsebody)
+            yield from self.elsebody
+        yield Label(end)
+
 
 class Call(Node):
     @debug
@@ -530,6 +574,9 @@ class Call(Node):
     def parse(cls, tree):
         name, *args = tree
         return cls(Name(name), *[Node.parse(x) for x in args])
+    # def __iter__(self):
+    #     for arg in reversed(self.args): yield from arg
+
 
 class UfuncBase(Node):
     pass
@@ -570,6 +617,8 @@ class Lambda(Node):
     def parse(cls, tree):
         _, params, body = tree
         return cls(Params.parse(params), Node.parse(body))
+    def __iter__(self):
+        yield CreateFunc(self)
 
 class Read(Node):
     @debug
@@ -690,7 +739,40 @@ class JumpIfTrue(Inst):
         if val.value:
             frames[-1].jump(self.label)
 
+class JumpIfFalse(Inst):
+    def __init__(self, label):
+        super().__init__(label)
+    label = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        val = frames[-1].pop()
+        if not val.value:
+            frames[-1].jump(self.label)
+
+class CreateFunc(Inst):
+    def __init__(self, func):
+        super().__init__(func)
+    func = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        func = self.func(env=frames[-1].env)
+        frames[-1].push(func)
+
 class PushFunc(Inst):
+    def __init__(self, name):
+        super().__init__(name)
+    name = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        func = frames[-1].env[self.name]
+        local_env = {}
+        for p in func.params:
+            local_env[p] = frames[-1].env
+        if isinstance(outer_env, ChainMap):
+            env = ChainMap(local_env, outer_env.maps[-1])
+        else:
+            env = ChainMap(local_env, outer_env)
+        frame = Frame(list(func), env=env)
+        frames.append(frame)
+
+class PushRawFunc(Inst):
     def __init__(self, insts, names=(), pc=0, stack=None, env=None):
         super().__init__(insts, names, pc, stack, env)
     insts = property(lambda self: self.children[0])
