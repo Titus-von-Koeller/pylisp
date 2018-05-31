@@ -105,7 +105,7 @@ class Node:
                'and': {2: And}, 'or': {2: Or}, 'not': {1: Not}, 'xor': {2: Xor}}
         if tree[0] in ops:
             return ops[tree[0]][len(tree[1:])].parse(tree)
-        pyfuncs = {'print': Print, 'printf': Printf, 'printfs': Printfs}
+        pyfuncs = {'print': Print, 'printf': Printf, 'printfs': Printfs, 'format': Format}
         if tree[0] in pyfuncs:
             return pyfuncs[tree[0]].parse(tree)
         if tree[0] == 'assert':
@@ -181,7 +181,7 @@ class Set(Node):
     def __iter__(self):
         yield from self.value
         yield PopVar(self.name.value)
-
+        yield PushVar(self.name.value)
 
 class Setg(Node):
     @debug
@@ -230,6 +230,8 @@ class Get(Node):
     def parse(cls, tree):
         _, name = tree
         return cls(Name(name))
+    def __iter__(self):
+        yield PushVar(self.name.value)
 
 class List(Node):
     @debug
@@ -247,6 +249,18 @@ class List(Node):
     def parse(cls, tree):
         _, *tree = tree
         return cls(*[Node.parse(x) for x in tree])
+    @staticmethod
+    def build(*vals):
+        values = [v for v in vals]
+        values.reverse()
+        rv = values[0], None
+        for v in values[1:]:
+            rv = v, rv
+        return rv
+    def __iter__(self):
+        for val in reversed(self.values):
+            yield from val
+        yield CallPyFunc(self.build, len(self.values))
 
 class Params(Node):
     def __call__(self, env):
@@ -272,6 +286,10 @@ class Cons(Node):
     def parse(cls, tree):
         _, car, cdr = tree
         return cls(Node.parse(car), Node.parse(cdr))
+    def __iter__(self):
+        yield from self.cdr
+        yield from self.car
+        yield CallPyFunc(lambda car, cdr: (car, cdr), 2)
 
 class Car(Node):
     @debug
@@ -284,6 +302,9 @@ class Car(Node):
     def parse(cls, tree):
         _, cons = tree
         return cls(Node.parse(cons))
+    def __iter__(self):
+        yield from self.cons
+        yield CallPyFunc(lambda x: x[0], 1)
 
 class Cdr(Node):
     @debug
@@ -296,6 +317,9 @@ class Cdr(Node):
     def parse(cls, tree):
         _, cons = tree
         return cls(Node.parse(cons))
+    def __iter__(self):
+        yield from self.cons
+        yield CallPyFunc(lambda x: x[1], 1)
 
 class Cell(Node):
     @debug
@@ -370,7 +394,7 @@ def create_unop(name, op):
                 return cls(Node.parse(arg))
             def __iter__(self):
                 yield from self.arg
-                yield CallPyFunc(op)
+                yield CallPyFunc(op, 1)
         return {name}
     ''')
     ns = {}
@@ -431,15 +455,10 @@ def create_pyfunc(name, func):
     exec(code, globals(), ns)
     return ns['create_func'](func)
 
-def printf(fmt, *args):
-    return print(fmt.format(*args), end='')
-
-def printfs(fmt, sep, *args):
-    return print(fmt.format(*args), sep=sep, end='')
-
-Print   = create_pyfunc('Print', print)
-Printf  = create_pyfunc('Printf', printf)
-Printfs = create_pyfunc('Printfs', printfs)
+Print   = create_pyfunc('Print',   print)
+Format  = create_pyfunc('Format',  format)
+Printf  = create_pyfunc('Printf',  lambda fmt, *args:      print(fmt.format(*args), end=''))
+Printfs = create_pyfunc('Printfs', lambda fmt, sep, *args: print(fmt.format(*args), sep=sep, end=''))
 
 class Name(Node):
     @debug
@@ -481,18 +500,24 @@ class Nil(Node):
     def __call__(self, env):
         return self
     value = property(lambda self: None)
+    def __iter__(self):
+        yield PushImm(self)
 Nil = Nil()
 
 class True_(Node):
     def __call__(self, env):
         return self
     value = property(lambda self: True)
+    def __iter__(self):
+        yield PushImm(self)
 True_ = True_()
 
 class False_(Node):
     def __call__(self, env):
         return self
     value = property(lambda self: False)
+    def __iter__(self):
+        yield PushImm(self)
 False_ = False_()
 
 class While(Node):
@@ -520,6 +545,7 @@ class While(Node):
         yield from self.body
         yield JumpAlways(start)
         yield Label(end)
+
 class IfElse(Node):
     @debug
     def __call__(self, env):
@@ -542,20 +568,18 @@ class IfElse(Node):
             return cls(Node.parse(cond), Node.parse(ifbody), Node.parse(*elsebody))
         return cls(Node.parse(cond), Node.parse(ifbody))
     def __iter__(self):
-        ifbody, elsebody, end = f'ifbody-{id(self)}', f'elsebody-{id(self)}', f'end-{id(self)}',
+        ifbody, elsebody, end = f'ifbody-{id(self)}', f'elsebody-{id(self)}', f'end-{id(self)}'
         yield from self.cond
         if self.elsebody:
             yield JumpIfFalse(elsebody)
         else:
             yield JumpIfFalse(end)
-        yield Label(ifbody)
         yield from self.ifbody
         if self.elsebody:
             yield JumpAlways(end)
             yield Label(elsebody)
             yield from self.elsebody
         yield Label(end)
-
 
 class Call(Node):
     @debug
@@ -574,9 +598,10 @@ class Call(Node):
     def parse(cls, tree):
         name, *args = tree
         return cls(Name(name), *[Node.parse(x) for x in args])
-    # def __iter__(self):
-    #     for arg in reversed(self.args): yield from arg
-
+    def __iter__(self):
+        for arg in reversed(self.args):
+            yield from arg
+        yield PushFunc(self.name.value)
 
 class UfuncBase(Node):
     pass
@@ -618,7 +643,7 @@ class Lambda(Node):
         _, params, body = tree
         return cls(Params.parse(params), Node.parse(body))
     def __iter__(self):
-        yield CreateFunc(self)
+        yield CreateFunc(self.params, self.body)
 
 class Read(Node):
     @debug
@@ -675,6 +700,9 @@ class Noop(Inst):
 class Missing(Inst):
     def __init__(self, node):
         super().__init__(node)
+    node = property(lambda self: self.children[0])
+    def __call__(self, frames):
+        raise NotImplementedError(f'unimplemented bytecode for {self.node}')
 
 class CallPyFunc(Inst):
     def __init__(self, func, args):
@@ -748,12 +776,26 @@ class JumpIfFalse(Inst):
         if not val.value:
             frames[-1].jump(self.label)
 
-class CreateFunc(Inst):
-    def __init__(self, func):
-        super().__init__(func)
-    func = property(lambda self: self.children[0])
+class Ufunc(UfuncBase):
+    def __init__(self, params, body, closures):
+        super().__init__(params, body, closures)
+    params   = property(lambda self: self.children[0])
+    body     = property(lambda self: self.children[1])
+    closures = property(lambda self: self.children[2])
     def __call__(self, frames):
-        func = self.func(env=frames[-1].env)
+        pass
+
+class CreateFunc(Inst):
+    def __init__(self, params, body):
+        super().__init__(params.value, [*body, PopFunc()])
+    params = property(lambda self: self.children[0])
+    body   = property(lambda self: self.children[1])
+    def __call__(self, frames):
+        if isinstance(frames[-1].env, ChainMap):
+            closures = frames[-1].env.maps[:-1]
+        else:
+            closures = []
+        func = Ufunc(self.params, self.body, closures)
         frames[-1].push(func)
 
 class PushFunc(Inst):
@@ -763,13 +805,14 @@ class PushFunc(Inst):
     def __call__(self, frames):
         func = frames[-1].env[self.name]
         local_env = {}
-        for p in func.params:
-            local_env[p] = frames[-1].env
+        for n in func.params:
+            local_env[n] = frames[-1].pop()
+        outer_env = frames[-1].env
         if isinstance(outer_env, ChainMap):
-            env = ChainMap(local_env, outer_env.maps[-1])
+            env = ChainMap(local_env, *func.closures, outer_env.maps[-1])
         else:
-            env = ChainMap(local_env, outer_env)
-        frame = Frame(list(func), env=env)
+            env = ChainMap(local_env, *func.closures, outer_env)
+        frame = Frame(func.body, env=env)
         frames.append(frame)
 
 class PushRawFunc(Inst):
@@ -803,7 +846,7 @@ class PopFunc(Inst):
         if self.name is not None:
             rv = frames[-1].env[self.name]
         else:
-            rv = Nil
+            rv = frames[-1].pop()
         frames.pop()
         if frames: frames[-1].push(rv)
 
@@ -828,6 +871,8 @@ class Frame:
         inst = self.insts[self.pc]
         self.pc += 1
         return inst
+    def __repr__(self):
+        return f'Frame(insts={self.insts!r}, pc={self.pc!r}, stack={self.stack!r}, env={self.env!r})'
     def push(self, value):
         self.stack.append(value)
     def pop(self):
@@ -845,7 +890,17 @@ def eval(insts, env=None):
             inst = next(frames[-1])
         except StopIteration:
             break
-        inst(frames)
+        try:
+            inst(frames)
+        except IndexError:
+            print(inst)
+            print(frames[-1])
+            print('-' * 50)
+            for pc in range(frames[-1].pc-5, frames[-1].pc+5):
+                if 0 <= pc < len(frames[-1].insts):
+                    print(frames[-1].insts[pc])
+            print('-' * 50)
+            raise
 
 NAME     = '[^"\'() \n\t]+'
 QUOTED   = r'"(?:[^"\\]|\\.)*"'

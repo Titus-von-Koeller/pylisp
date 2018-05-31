@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from nodes import *
 from random import randint
+from io import StringIO
 from argparse import ArgumentParser
 from logging import getLogger, basicConfig, DEBUG, INFO, ERROR
 logger = getLogger(__name__)
@@ -421,6 +422,8 @@ def test_bytecode():
     return parse(code)
 
 def test_eval():
+    def print_to_buffer(*args, **kwargs):
+        return print(*args, **kwargs, file=buf)
     insts = [
         # x = 0
         PushImm(Atom(0)),
@@ -436,15 +439,15 @@ def test_eval():
         # print('x =', x)
         PushVar('x'),
         PushImm(Atom('x =')),
-        CallPyFunc(print, 2),
+        CallPyFunc(print_to_buffer, 2),
 
         PushImm(Atom("hello world")),
-        CallPyFunc(print, 1),
+        CallPyFunc(print_to_buffer, 1),
         PushImm(Atom(1)),
         PushImm(Atom(1)),
         CallPyFunc(add, 2),
         PushVar('msg'),
-        CallPyFunc(print, 2),
+        CallPyFunc(print_to_buffer, 2),
 
         # x = x + 1
         PushVar('x'),
@@ -456,49 +459,83 @@ def test_eval():
 
         Halt(),
         PushImm(Atom("goodbye")),
-        CallPyFunc(print, 1),
+        CallPyFunc(print_to_buffer, 1),
     ]
+    buf = StringIO()
     eval(insts, {'msg': Atom('1 + 1 =')})
+    expected = dedent('''
+        x = 0
+        hello world
+        1 + 1 = 2
+        x = 1
+        hello world
+        1 + 1 = 2
+        x = 2
+        hello world
+        1 + 1 = 2
+        x = 3
+        hello world
+        1 + 1 = 2
+    ''')
+    if buf.getvalue().strip() != expected.strip():
+        raise ProgramError('eval(...) failed!')
+
     func_insts = [
         # print('inside', 'before', x)
         PushVar('x'),
         PushImm(Atom('before')),
         PushImm(Atom('inside')),
-        CallPyFunc(print, 3),
+        CallPyFunc(print_to_buffer, 3),
+
         # x = x * 10
         PushVar('x'),
         PushImm(Atom(10)),
         CallPyFunc(mul, 2),
         PopVar('x'),
+
         # print('inside', 'after', x)
         PushVar('x'),
         PushImm(Atom('after')),
         PushImm(Atom('inside')),
-        CallPyFunc(print, 3),
+        CallPyFunc(print_to_buffer, 3),
         PopFunc(),
     ]
+
     insts = [
         # x = 0
         PushImm(Atom(1)),
         PopVar('x'),
+
         # print('outside', 'before', x)
         PushVar('x'),
         PushImm(Atom('before')),
         PushImm(Atom('outside')),
-        CallPyFunc(print, 3),
+        CallPyFunc(print_to_buffer, 3),
+
         # f(x * 10)
         PushImm(Atom(10)),
         PushVar('x'),
         CallPyFunc(mul, 2),
         PushRawFunc(func_insts, ['x']),
+
         # print('outside', 'after', x)
         PushVar('x'),
         PushImm(Atom('after')),
         PushImm(Atom('outside')),
-        CallPyFunc(print, 3),
+        CallPyFunc(print_to_buffer, 3),
+
         Halt(),
     ]
+    expected = dedent('''
+        outside before 1
+        inside before 10
+        inside after 100
+        outside after 1
+    ''')
+    buf = StringIO()
     eval(insts)
+    if buf.getvalue().strip() != expected.strip():
+        raise ProgramError('eval(...) failed!')
 
 def test_eval2():
     code = r'''
@@ -512,20 +549,58 @@ def test_eval2():
 
         (print "Collatz Conjecture")
         (set f (lambda (n) (
+            (set rv nil)
             (while (<> n 1) (
-                (printf "{} " n)
+                (set rv (cons n rv))
                 (if (% n 2)
                     (set n (+ (* 3 n) 1))
                     (set n (/ n 2))
                 )
             ))
-            (printf "{}\n" n)
+            (set rv (cons n rv))
         )))
 
-        (printf "(collatz 12) -> ")
-        (f 12)
-        (printf "(collatz 19) -> ")
-        (f 19)
+        (set join (lambda (sep lst) (
+            (set rv "")
+            (while (<> lst nil) (
+                (set rv (+ rv (+ sep (format (car lst)))))
+                (set lst (cdr lst))
+            ))
+            (get rv)
+        )))
+
+        (printf "(collatz 12) -> {}\n" (join " " (f 12)))
+        (printf "(collatz 19) -> {}\n" (join " " (f 19)))
+
+        (print "Closure")
+        (set f (lambda (n) (
+            (lambda (x) (+ x n))
+        )))
+
+        (set f1 (f 1))
+        (set f2 (f 2))
+        (set f3 (f 3))
+        (printf "(f1 10) -> {}\n" (f1 10))
+        (printf "(f2 10) -> {}\n" (f2 10))
+        (printf "(f3 10) -> {}\n" (f3 10))
+
+        (print "Closure 2")
+        (set f (lambda (x) (
+            (lambda (y) (
+                (lambda (z) (list x y z))
+            ))
+        )))
+
+        (set f1 (f 1))
+        (set f2 (f 2))
+        (set f11 (f1 1))
+        (set f12 (f1 2))
+        (set f21 (f2 1))
+        (set f22 (f2 2))
+        (printf "(f11 10) -> {}\n" (f11 10))
+        (printf "(f12 10) -> {}\n" (f12 10))
+        (printf "(f21 10) -> {}\n" (f21 10))
+        (printf "(f22 10) -> {}\n" (f22 10))
     '''
     print(' Step 1: Source Code '.center(60, '='))
     print(code)
