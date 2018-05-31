@@ -4,6 +4,7 @@ from decimal import Decimal
 from textwrap import indent, dedent
 from collections import defaultdict, Iterable, ChainMap
 from functools import wraps
+from copy import deepcopy
 from logging import getLogger
 from pprint import pformat
 from ast import literal_eval
@@ -53,6 +54,11 @@ class Node:
         self.children = children
     def __repr__(self):
         return f'{type(self).__name__}({", ".join(repr(x) for x in self.children)})'
+    def __deepcopy__(self, memo=None):
+        return type(self)(*deepcopy(self.children, memo))
+    def replace(self, node):
+        self.__class__ = node.__class__
+        self.children = node.children
     def pformat(self, level=0):
         if not self.children:
             return f'{type(self).__name__}()'
@@ -412,6 +418,8 @@ from operator import pos, neg
 Pos = create_unop('Pos', pos)
 Neg = create_unop('Neg', neg)
 
+UNOPS = (Pos, Neg)
+
 from operator import eq, ne, lt, gt, le, ge
 Eq = create_binop('Eq', eq)
 Ne = create_binop('Ne', ne)
@@ -434,6 +442,8 @@ Or  = create_binop('Or',  or_)
 Not = create_binop('Not', not_)
 Xor = create_binop('Xor', xor)
 Is  = create_binop('Is',  is_)
+
+BINOPS = (Eq, Ne, Lt, Gt, Le, Ge, Add, Sub, Mul, Div, Mod, Pow, And, Or, Not, Xor, Is)
 
 def create_pyfunc(name, func):
     code = dedent(f'''
@@ -614,7 +624,7 @@ class TailCall(Call):
     def __iter__(self):
         for arg in reversed(self.args):
             yield from arg
-        yield PushFunc(self.name.value, tco=True)
+        yield PushTailFunc(self.name.value)
 
 class UfuncBase(Node):
     pass
@@ -812,11 +822,10 @@ class CreateFunc(Inst):
         frames[-1].push(func)
 
 class PushFunc(Inst):
-    def __init__(self, name, tco=False):
-        super().__init__(name, tco)
+    def __init__(self, name):
+        super().__init__(name)
     name = property(lambda self: self.children[0])
-    tco  = property(lambda self: self.children[1])
-    def __call__(self, frames):
+    def prepare(self, frames):
         func = frames[-1].env[self.name]
         local_env = {}
         for n in func.params:
@@ -826,6 +835,9 @@ class PushFunc(Inst):
             env = ChainMap(local_env, *func.closures, outer_env.maps[-1])
         else:
             env = ChainMap(local_env, *func.closures, outer_env)
+        return func, env
+    def __call__(self, frames):
+        func, env = self.prepare(frames)
         frame = Frame(func.body, env=env, stats=frames[-1].stats)
         frames.append(frame)
 
@@ -833,6 +845,19 @@ class PushFunc(Inst):
         stats = frames[-1].stats
         stats.func_calls += 1
         stats.num_frames += 1
+        stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
+
+class PushTailFunc(PushFunc):
+    def __call__(self, frames):
+        func, env = self.prepare(frames)
+        frame = frames[-1]
+        frame.pc = 0
+        frame.env = env
+
+        # stats
+        stats = frames[-1].stats
+        stats.func_calls += 1
+        stats.num_frames += 0
         stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
 
 class PushRawFunc(Inst):
@@ -989,3 +1014,53 @@ def parse(s):
     logger.info('tokens\n%s', pformat(tokens))
     ast = build_ast(tokens)
     return ast
+
+def traverse(tree, func=None):
+    if not isinstance(tree, Node):
+        return
+    if isinstance(tree, Set) \
+        and isinstance(tree.value, Lambda):
+        func = tree.name
+
+    yield tree, func
+    for child in tree.children:
+        yield from traverse(child, func)
+
+def constant_folding(tree):
+    tree = deepcopy(tree)
+    finished = False
+    while True:
+        did_optimization = False
+        for node, _ in traverse(tree):
+            if isinstance(node, UNOPS) \
+                and isinstance(node.arg, Atom):
+                new_node = node(env={})
+                node.replace(new_node)
+                did_optimization = True
+        for node, _ in traverse(tree):
+            if isinstance(node, BINOPS) \
+                and isinstance(node.left, Atom) \
+                and isinstance(node.right, Atom):
+                new_node = node(env={})
+                node.replace(new_node)
+                did_optimization = True
+        if not did_optimization:
+            break
+    return tree
+
+def identify_tail_calls(tree):
+    tree = deepcopy(tree)
+
+    for node, func in traverse(tree):
+        if isinstance(node, Ret) \
+            and isinstance(node.value, Call) \
+            and node.value.name.name == func.name:
+            new_node = Ret(TailCall(*node.value.children))
+            node.replace(new_node)
+
+    return tree
+
+def optimize_ast(tree, optimizations=(constant_folding, identify_tail_calls)):
+    for opt in optimizations:
+        tree = opt(tree)
+    return tree

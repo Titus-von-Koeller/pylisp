@@ -629,21 +629,108 @@ def test_bytecode3():
 
         (set f (lambda (n) (
             (if (== n 0) (ret nil))
-            (ret (cons n (^f (- n 1))))
+            (ret (cons n (f (- n 1))))
         )))
 
         (set sum (lambda (lst) (
             (if (== lst nil) (ret 0))
-            (ret (+ (car lst) (^sum (cdr lst))))
+            (ret (+ (car lst) (sum (cdr lst))))
         )))
 
-        (printf "(sum (f 2000)) = {}\n" (sum (f 2000)))
+        (printf "(sum (f 10)) = {}\n" (sum (f 10)))
     '''
     suite = parse(code)
     bytecode = list(suite)
     stats = eval(bytecode)
     print(stats)
-    
+
+    code = r'''
+        (printf "\nWithout TCO\n")
+        (set fac (lambda (n) (
+            (fac-tr 1 n)
+        )))
+        (set fac-tr (lambda (acc n) (
+            (if (< n 2)
+                (ret acc)
+                (ret (fac-tr (* acc n) (- n 1)))
+            )
+        )))
+
+        (printf "(fac 10) = {}\n" (fac 10))
+    '''
+    suite = parse(code)
+    bytecode = list(suite)
+    stats = eval(bytecode)
+    print(stats)
+
+    code = r'''
+        (printf "\nWith Manual TC\n")
+        (set fac (lambda (n) (
+            (fac-tr 1 n)
+        )))
+        (set fac-tr (lambda (acc n) (
+            (if (< n 2)
+                (ret acc)
+                (ret (^fac-tr (* acc n) (- n 1)))
+            )
+        )))
+
+        (printf "(fac 10) = {}\n" (fac 10))
+    '''
+    suite = parse(code)
+    bytecode = list(suite)
+    stats = eval(bytecode)
+    print(stats)
+
+    code = r'''
+        (printf "\nWith TCO\n")
+        (set fac (lambda (n) (
+            (fac-tr 1 n)
+        )))
+        (set fac-tr (lambda (acc n) (
+            (if (< n 2)
+                (ret acc)
+                (ret (fac-tr (* acc n) (- n 1)))
+            )
+        )))
+
+        (printf "(fac 10) = {}\n" (fac 10))
+    '''
+    suite = parse(code)
+    suite = optimize_ast(suite)
+    bytecode = list(suite)
+    stats = eval(bytecode)
+    print(stats)
+
+def test_optimizer():
+    code = r'''
+        (printf "(- (* 2 (+ 3 4))) = {}\n" (- (* 2 (+ 3 4))))
+    '''
+    suite = parse(code)
+    optimized_suite = optimize_ast(suite)
+    print(suite.pformat())
+    bytecode = list(optimized_suite)
+    eval(bytecode)
+    print(optimized_suite.pformat())
+    bytecode = list(optimized_suite)
+    eval(bytecode)
+
+    code = r'''
+        (set f (lambda (n) (
+            (if (== n 0) (ret n))
+            (ret (f (- n 1)))
+        )))
+        
+        (f 10)
+    '''
+    suite = parse(code)
+    optimized_suite = optimize_ast(suite)
+    print(suite.pformat())
+    bytecode = list(optimized_suite)
+    eval(bytecode)
+    print(optimized_suite.pformat())
+    bytecode = list(optimized_suite)
+    eval(bytecode)
 
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
@@ -713,6 +800,9 @@ if __name__ == '__main__':
 
     if 'bytecode3' in args.tests or not args.tests:
         test_bytecode3()
+
+    if 'optimizer' in args.tests or not args.tests:
+        test_optimizer()
 
     print('All tests passed!')
 
