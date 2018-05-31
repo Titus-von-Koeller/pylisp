@@ -92,8 +92,8 @@ class Node:
             return Setg.parse(tree)
         if tree[0] == 'setc':
             return Setc.parse(tree)
-        if tree[0] == 'get':
-            return Get.parse(tree)
+        if tree[0] == 'ret':
+            return Ret.parse(tree)
         if tree[0] == 'lambda':
             return Lambda.parse(tree)
         comparisons = {'==': Eq, '<>': Ne, '<': Lt, '>': Gt, '<=': Le, '>=': Ge,}
@@ -131,9 +131,15 @@ class Node:
         if tree[0] == 'read':
             return Read.parse(tree)
         if len(tree) == 1:
+            if tree[0].startswith('^'):
+                tree[0] = tree[0][1:]
+                return TailCall.parse(tree)
             return Call.parse(tree)
         if isinstance(tree[0], str):
             if len(tree) > 1:
+                if tree[0].startswith('^'):
+                    tree[0] = tree[0][1:]
+                    return TailCall.parse(tree)
                 return Call.parse(tree)
             return Var(tree[0])
         return NotImplemented.parse(tree)
@@ -219,19 +225,20 @@ class Setc(Node):
         _, name, value = tree
         return cls(Name(name), Node.parse(value))
 
-class Get(Node):
+class Ret(Node):
     @debug
     def __call__(self, env):
-        return env[self.name.value]
-    def __init__(self, name):
-        super().__init__(name)
-    name = property(lambda self: self.children[0])
+        return self.value(env)
+    def __init__(self, value):
+        super().__init__(value)
+    value = property(lambda self: self.children[0])
     @classmethod
     def parse(cls, tree):
-        _, name = tree
-        return cls(Name(name))
+        _, value = tree
+        return cls(Node.parse(value))
     def __iter__(self):
-        yield PushVar(self.name.value)
+        yield from self.value
+        yield PopFunc()
 
 class List(Node):
     @debug
@@ -603,6 +610,12 @@ class Call(Node):
             yield from arg
         yield PushFunc(self.name.value)
 
+class TailCall(Call):
+    def __iter__(self):
+        for arg in reversed(self.args):
+            yield from arg
+        yield PushFunc(self.name.value, tco=True)
+
 class UfuncBase(Node):
     pass
 
@@ -799,9 +812,10 @@ class CreateFunc(Inst):
         frames[-1].push(func)
 
 class PushFunc(Inst):
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self, name, tco=False):
+        super().__init__(name, tco)
     name = property(lambda self: self.children[0])
+    tco  = property(lambda self: self.children[1])
     def __call__(self, frames):
         func = frames[-1].env[self.name]
         local_env = {}
@@ -812,8 +826,14 @@ class PushFunc(Inst):
             env = ChainMap(local_env, *func.closures, outer_env.maps[-1])
         else:
             env = ChainMap(local_env, *func.closures, outer_env)
-        frame = Frame(func.body, env=env)
+        frame = Frame(func.body, env=env, stats=frames[-1].stats)
         frames.append(frame)
+
+        # stats
+        stats = frames[-1].stats
+        stats.func_calls += 1
+        stats.num_frames += 1
+        stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
 
 class PushRawFunc(Inst):
     def __init__(self, insts, names=(), pc=0, stack=None, env=None):
@@ -835,8 +855,14 @@ class PushRawFunc(Inst):
             env = ChainMap(local_env, outer_env.maps[-1])
         else:
             env = ChainMap(local_env, outer_env)
-        frame = Frame(self.insts, self.pc, self.stack, env)
+        frame = Frame(self.insts, self.pc, self.stack, env, stats=frames[-1].stats)
         frames.append(frame)
+
+        # stats
+        stats = frames[-1].stats
+        stats.func_calls += 1
+        stats.num_frames += 1
+        stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
 
 class PopFunc(Inst):
     def __init__(self, name=None):
@@ -850,8 +876,16 @@ class PopFunc(Inst):
         frames.pop()
         if frames: frames[-1].push(rv)
 
+class Stats:
+    def __init__(self):
+        self.func_calls = 0
+        self.num_frames = 0
+        self.max_frame_depth = 0
+    def __repr__(self):
+        return f'Stats(func_calls={self.func_calls!r}, num_frames={self.num_frames!r}, max_frame_depth={self.max_frame_depth!r})'
+
 class Frame:
-    def __init__(self, insts, pc=0, stack=None, env=None):
+    def __init__(self, insts, pc=0, stack=None, env=None, stats=None):
         self.insts = insts
         self.labels = {inst.name: idx for idx, inst in enumerate(insts)
                        if isinstance(inst, Label)}
@@ -862,6 +896,9 @@ class Frame:
         if env is None:
             env = {}
         self.env = env
+        if stats is None:
+            stats = Stats()
+        self.stats = stats
     def __iter__(self):
         self.pc = 0
         return self
@@ -884,7 +921,10 @@ def eval(insts, env=None):
     if env is None:
         env = {}
 
-    frames = [Frame(insts, env=env)]
+    stats = Stats()
+    frames = [Frame(insts, env=env, stats=stats)]
+    stats.num_frames += 1
+    stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
     while frames:
         try:
             inst = next(frames[-1])
@@ -901,6 +941,7 @@ def eval(insts, env=None):
                     print(frames[-1].insts[pc])
             print('-' * 50)
             raise
+    return stats
 
 NAME     = '[^"\'() \n\t]+'
 QUOTED   = r'"(?:[^"\\]|\\.)*"'

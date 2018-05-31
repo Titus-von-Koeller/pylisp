@@ -276,7 +276,7 @@ def test_parser():
             (printf "{{}} " (car xs))
             (set xs (cdr xs))
         )
-        (printf "\n")
+        (printf "\\n")
     )))
 
     (
@@ -305,7 +305,7 @@ def test_parser():
                         )
                     )
                 )
-                (get rv)
+                (ret rv)
             )
         ))
         (print-list (cons "(fizzbuzz 20) =" (fizzbuzz 20)))
@@ -323,7 +323,7 @@ def test_parser():
     return parse(code)
 
 def test_repl():
-    code = '''
+    code = r'''
     (print (parse "(+ 1 2)"))
 
     (set node '(+ 1 2))
@@ -343,13 +343,13 @@ def test_repl():
     return parse(code)
 
 def test_scoping():
-    code = '''
+    code = r'''
         (set y 10)
         (set z 10)
 
         (set create-closure-fun (lambda (z) (
             (set closure-fun (lambda () (
-                (get z)
+                (ret z)
             )))
         )))
 
@@ -364,7 +364,7 @@ def test_scoping():
         (set create-nested-closure-fun (lambda (z) (
             (set create-closure-fun (lambda () (
                 (set closure-fun (lambda () (
-                    (get z)
+                    (ret z)
                 )))
             )))
             (create-closure-fun)
@@ -413,15 +413,6 @@ def test_scoping():
     return parse(code)
 
 def test_bytecode():
-    code = '''
-        (print "Bytecode test.")
-        (set x (+ 1 1))
-        (set x (* x 10))
-        (printf "x = {}" x)
-    '''
-    return parse(code)
-
-def test_eval():
     def print_to_buffer(*args, **kwargs):
         return print(*args, **kwargs, file=buf)
     insts = [
@@ -537,7 +528,7 @@ def test_eval():
     if buf.getvalue().strip() != expected.strip():
         raise ProgramError('eval(...) failed!')
 
-def test_eval2():
+def test_bytecode2():
     code = r'''
         (print "Bytecode test.")
         (set x 10)
@@ -566,7 +557,7 @@ def test_eval2():
                 (set rv (+ rv (+ sep (format (car lst)))))
                 (set lst (cdr lst))
             ))
-            (get rv)
+            (ret rv)
         )))
 
         (printf "(collatz 12) -> {}\n" (join " " (f 12)))
@@ -621,6 +612,38 @@ def test_eval2():
     print('\n')
     print('=' * 60)
 
+def test_bytecode3():
+    code = r'''
+        (print "Bytecode test.")
+
+        (set f (lambda (x) (
+            (if (== (% x 2) 0)
+                (ret (* x 100))
+            )
+            (set x (* x 10))
+            (ret x)
+        )))
+
+        (printf "(f 3) = {}\n" (f 3))
+        (printf "(f 4) = {}\n" (f 4))
+
+        (set f (lambda (n) (
+            (if (== n 0) (ret nil))
+            (ret (cons n (^f (- n 1))))
+        )))
+
+        (set sum (lambda (lst) (
+            (if (== lst nil) (ret 0))
+            (ret (+ (car lst) (^sum (cdr lst))))
+        )))
+
+        (printf "(sum (f 2000)) = {}\n" (sum (f 2000)))
+    '''
+    suite = parse(code)
+    bytecode = list(suite)
+    stats = eval(bytecode)
+    print(stats)
+    
 
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
@@ -683,16 +706,13 @@ if __name__ == '__main__':
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
     if 'bytecode' in args.tests or not args.tests:
-        suite = test_bytecode()
-        logger.info(f'suite = %s',           suite.pformat())
-        logger.info('iter(suite):\n%s', '\n'.join('\t' + repr(x) for x in suite))
-        logger.info('eval(suite, env={}) = %r', eval(suite, env={}))
+        test_bytecode()
 
-    if 'eval' in args.tests or not args.tests:
-        test_eval()
+    if 'bytecode2' in args.tests or not args.tests:
+        test_bytecode2()
 
-    if 'eval2' in args.tests or not args.tests:
-        test_eval2()
+    if 'bytecode3' in args.tests or not args.tests:
+        test_bytecode3()
 
     print('All tests passed!')
 
