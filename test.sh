@@ -1,1 +1,1 @@
-while true; do clear && python test-nodes.py "$@"; inotifywait -e create,modify test-nodes.py nodes.py 2>/dev/null; done
+while true; do clear && python test-nodes.py "$@"; inotifywait -e create,modify pylisp/*.py *.py 2>/dev/null; done

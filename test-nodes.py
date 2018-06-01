@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-from nodes import *
+from pylisp import *
+from textwrap import dedent
+from operator import lt, add, mul
 from random import randint
 from io import StringIO
 from argparse import ArgumentParser
@@ -216,55 +218,6 @@ def test_functions(n):
         Print(Atom('All functions tests passed!')),
     )
 
-def test_tco(n):
-    def fact(n):
-        if n == 0:
-            return 1
-        return n * fact(n-1)
-    return Suite(
-        Set(
-            Name('fact'),
-            Lambda(
-                Params('n'),
-                Suite(
-                    IfElse(
-                        Eq(
-                            Var('n'),
-                            Atom(0),
-                        ),
-                        Atom(1),
-                        Mul(
-                            Var('n'),
-                            Call(
-                                Name('fact'),
-                                Sub(Var('n'), Atom(1)),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        Set(
-            Name('rv'),
-            Call(
-                Name('fact'),
-                Atom(n),
-            ),
-        ),
-        Print(
-            Atom(f'(fact {n}) ='),
-            Var('rv'),
-        ),
-        Assert(
-            Eq(
-                Var('rv'),
-                Atom(fact(n)),
-            ),
-            Atom(f'(fact {n}) failed!')
-        ),
-        Print(Atom('All tests passed!')),
-    )
-
 def test_parser():
     def quote(x):
         if isinstance(x, str):
@@ -413,47 +366,47 @@ def test_scoping():
     return parse(code)
 
 def test_bytecode():
-    def print_to_buffer(*args, **kwargs):
-        return print(*args, **kwargs, file=buf)
     insts = [
         # x = 0
-        PushImm(Atom(0)),
+        PushImm(0),
         PopVar('x'),
 
         # while x < 3:
         Label('loop-start'),
         PushVar('x'),
-        PushImm(Atom(3)),
+        PushImm(3),
         CallPyFunc(lt, 2),
         JumpIfTrue('loop-end'),
 
         # print('x =', x)
         PushVar('x'),
-        PushImm(Atom('x =')),
-        CallPyFunc(print_to_buffer, 2),
+        PushImm('x ='),
+        CallPyFunc(print, 2),
 
-        PushImm(Atom("hello world")),
-        CallPyFunc(print_to_buffer, 1),
-        PushImm(Atom(1)),
-        PushImm(Atom(1)),
+        PushImm("hello world"),
+        CallPyFunc(print, 1),
+        PushImm(1),
+        PushImm(1),
         CallPyFunc(add, 2),
         PushVar('msg'),
-        CallPyFunc(print_to_buffer, 2),
+        CallPyFunc(print, 2),
 
         # x = x + 1
         PushVar('x'),
-        PushImm(Atom(1)),
+        PushImm(1),
         CallPyFunc(add, 2),
         PopVar('x'),
         JumpAlways('loop-start'),
         Label('loop-end'),
 
         Halt(),
-        PushImm(Atom("goodbye")),
-        CallPyFunc(print_to_buffer, 1),
+        PushImm("goodbye"),
+        CallPyFunc(print, 1),
     ]
     buf = StringIO()
-    eval(insts, {'msg': Atom('1 + 1 =')})
+    import sys; old_stdout = sys.stdout; sys.stdout = buf
+    evaluate(insts, {'msg': '1 + 1 ='})
+    sys.stdout = old_stdout
     expected = dedent('''
         x = 0
         hello world
@@ -474,46 +427,46 @@ def test_bytecode():
     func_insts = [
         # print('inside', 'before', x)
         PushVar('x'),
-        PushImm(Atom('before')),
-        PushImm(Atom('inside')),
-        CallPyFunc(print_to_buffer, 3),
+        PushImm('before'),
+        PushImm('inside'),
+        CallPyFunc(print, 3),
 
         # x = x * 10
         PushVar('x'),
-        PushImm(Atom(10)),
+        PushImm(10),
         CallPyFunc(mul, 2),
         PopVar('x'),
 
         # print('inside', 'after', x)
         PushVar('x'),
-        PushImm(Atom('after')),
-        PushImm(Atom('inside')),
-        CallPyFunc(print_to_buffer, 3),
+        PushImm('after'),
+        PushImm('inside'),
+        CallPyFunc(print, 3),
         PopFunc(),
     ]
 
     insts = [
         # x = 0
-        PushImm(Atom(1)),
+        PushImm(1),
         PopVar('x'),
 
         # print('outside', 'before', x)
         PushVar('x'),
-        PushImm(Atom('before')),
-        PushImm(Atom('outside')),
-        CallPyFunc(print_to_buffer, 3),
+        PushImm('before'),
+        PushImm('outside'),
+        CallPyFunc(print, 3),
 
         # f(x * 10)
-        PushImm(Atom(10)),
+        PushImm(10),
         PushVar('x'),
         CallPyFunc(mul, 2),
         PushRawFunc(func_insts, ['x']),
 
         # print('outside', 'after', x)
         PushVar('x'),
-        PushImm(Atom('after')),
-        PushImm(Atom('outside')),
-        CallPyFunc(print_to_buffer, 3),
+        PushImm('after'),
+        PushImm('outside'),
+        CallPyFunc(print, 3),
 
         Halt(),
     ]
@@ -524,9 +477,12 @@ def test_bytecode():
         outside after 1
     ''')
     buf = StringIO()
-    eval(insts)
+    import sys; old_stdout = sys.stdout; sys.stdout = buf
+    evaluate(insts)
+    sys.stdout = old_stdout
     if buf.getvalue().strip() != expected.strip():
         raise ProgramError('eval(...) failed!')
+    print('Bytecode test #1 passed.')
 
 def test_bytecode2():
     code = r'''
@@ -593,57 +549,42 @@ def test_bytecode2():
         (printf "(f21 10) -> {}\n" (f21 10))
         (printf "(f22 10) -> {}\n" (f22 10))
     '''
-    print(' Step 1: Source Code '.center(60, '='))
-    print(code)
-    print('\n')
-    print(' Step 2: Parse Into AST '.center(60, '='))
     suite = parse(code)
-    print(suite.pformat())
-    print('\n')
-    print(' Step 3: "Compile" Into Bytecode '.center(60, '='))
-    for bytecode in suite:
-        print(bytecode)
-    print('\n')
-    print(' Step 4a: Evaluate Without Bytecode '.center(60, '='))
-    suite(env={})
-    print('\n')
-    print(' Step 4b: Evaluate Using Bytecode '.center(60, '='))
-    eval(list(suite))
-    print('\n')
-    print('=' * 60)
+    bytecodes = list(suite)
+    buf = StringIO()
+    import sys; old_stdout = sys.stdout; sys.stdout = buf
+    evaluate(bytecodes)
+    sys.stdout = old_stdout
+    expected = dedent('''
+        Bytecode test.
+        x = 10, y = 100
+        x = 9, y = 90
+        x = 8, y = 80
+        x = 7, y = 70
+        x = 6, y = 60
+        x = 5, y = 50
+        x = 4, y = 40
+        x = 3, y = 30
+        x = 2, y = 20
+        x = 1, y = 10
+        Collatz Conjecture
+        (collatz 12) ->  1 2 4 8 16 5 10 3 6 12
+        (collatz 19) ->  1 2 4 8 16 5 10 20 40 13 26 52 17 34 11 22 44 88 29 58 19
+        Closure
+        (f1 10) -> 11
+        (f2 10) -> 12
+        (f3 10) -> 13
+        Closure 2
+        (f11 10) -> (Decimal('1'), (Decimal('1'), (Decimal('10'), None)))
+        (f12 10) -> (Decimal('1'), (Decimal('2'), (Decimal('10'), None)))
+        (f21 10) -> (Decimal('2'), (Decimal('1'), (Decimal('10'), None)))
+        (f22 10) -> (Decimal('2'), (Decimal('2'), (Decimal('10'), None)))
+    ''')
+    if buf.getvalue().strip() != expected.strip():
+        raise ProgramError('eval(...) failed!')
+    print('Bytecode test #2 passed.')
 
 def test_bytecode3():
-    code = r'''
-        (print "Bytecode test.")
-
-        (set f (lambda (x) (
-            (if (== (% x 2) 0)
-                (ret (* x 100))
-            )
-            (set x (* x 10))
-            (ret x)
-        )))
-
-        (printf "(f 3) = {}\n" (f 3))
-        (printf "(f 4) = {}\n" (f 4))
-
-        (set f (lambda (n) (
-            (if (== n 0) (ret nil))
-            (ret (cons n (f (- n 1))))
-        )))
-
-        (set sum (lambda (lst) (
-            (if (== lst nil) (ret 0))
-            (ret (+ (car lst) (sum (cdr lst))))
-        )))
-
-        (printf "(sum (f 10)) = {}\n" (sum (f 10)))
-    '''
-    suite = parse(code)
-    bytecode = list(suite)
-    stats = eval(bytecode)
-    print(stats)
-
     code = r'''
         (printf "\nWithout TCO\n")
         (set fac (lambda (n) (
@@ -660,8 +601,8 @@ def test_bytecode3():
     '''
     suite = parse(code)
     bytecode = list(suite)
-    stats = eval(bytecode)
-    print(stats)
+    stats = evaluate(bytecode)
+    logger.info(stats)
 
     code = r'''
         (printf "\nWith Manual TC\n")
@@ -679,8 +620,10 @@ def test_bytecode3():
     '''
     suite = parse(code)
     bytecode = list(suite)
-    stats = eval(bytecode)
-    print(stats)
+    stats = evaluate(bytecode)
+    logger.info(stats)
+    if stats.max_frame_depth > 3:
+        raise ProgramError('Manual tail-calls test failed!')
 
     code = r'''
         (printf "\nWith TCO\n")
@@ -699,8 +642,11 @@ def test_bytecode3():
     suite = parse(code)
     suite = optimize_ast(suite)
     bytecode = list(suite)
-    stats = eval(bytecode)
-    print(stats)
+    stats = evaluate(bytecode)
+    logger.info(stats)
+    if stats.max_frame_depth > 3:
+        raise ProgramError('Automatic TCO test failed!')
+    print('Bytecode test #3 (tail calls) passed.')
 
 def test_optimizer():
     code = r'''
@@ -709,28 +655,50 @@ def test_optimizer():
     suite = parse(code)
     optimized_suite = optimize_ast(suite)
     print(suite.pformat())
-    bytecode = list(optimized_suite)
-    eval(bytecode)
+    bytecode = list(suite)
+    evaluate(bytecode)
     print(optimized_suite.pformat())
     bytecode = list(optimized_suite)
-    eval(bytecode)
+    evaluate(bytecode)
+
+    print('-' * 50)
 
     code = r'''
         (set f (lambda (n) (
             (if (== n 0) (ret n))
             (ret (f (- n 1)))
         )))
-        
+
         (f 10)
     '''
     suite = parse(code)
     optimized_suite = optimize_ast(suite)
     print(suite.pformat())
-    bytecode = list(optimized_suite)
-    eval(bytecode)
+    bytecode = list(suite)
+    evaluate(bytecode)
     print(optimized_suite.pformat())
     bytecode = list(optimized_suite)
-    eval(bytecode)
+    evaluate(bytecode)
+
+    code = r'''
+        (printf "\nBytecode Optimizations\n")
+        (set x 0)
+        (set x (+ x 1))
+        (set x (+ x 1))
+        (set x (+ x 1))
+        (printf "x = {}\n" x)
+    '''
+    suite = parse(code)
+    bytecode = list(suite)
+    optimized_bytecode = optimize_bytecodes(bytecode)
+    print()
+    for inst in bytecode:
+        print(inst)
+    evaluate(bytecode)
+    print()
+    for inst in optimized_bytecode:
+        print(inst)
+    evaluate(optimized_bytecode)
 
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
@@ -761,11 +729,6 @@ if __name__ == '__main__':
         logger.info(f'suite = %s',           suite.pformat())
         logger.info(f'suite(env={{}}) = %r', suite(env={}))
 
-    if 'tco' in args.tests:
-        suite = test_tco(40)
-        logger.info(f'suite = %s',           suite.pformat())
-        logger.info(f'suite(env={{}}) = %r', suite(env={}))
-
     if 'parser' in args.tests or not args.tests:
         suite = test_parser()
         logger.info(f'suite = %s',           suite.pformat())
@@ -785,7 +748,7 @@ if __name__ == '__main__':
         env = {'--stdin': MockStdin()}
         logger.info(f'suite(env=%r) = %r', env, suite(env=env))
 
-    import nodes
+    # import pylisp.nodes as nodes
     # nodes.__scoping__ = nodes.Scoping.DYNAMIC
     if 'scoping' in args.tests or not args.tests:
         suite = test_scoping()

@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+from .insts import *
+from .parser import parse
+
 from re import compile, escape
 from decimal import Decimal
 from textwrap import indent, dedent
 from collections import defaultdict, Iterable, ChainMap
 from functools import wraps
+from itertools import count
 from copy import deepcopy
 from logging import getLogger
 from pprint import pformat
@@ -418,7 +422,7 @@ from operator import pos, neg
 Pos = create_unop('Pos', pos)
 Neg = create_unop('Neg', neg)
 
-UNOPS = (Pos, Neg)
+UNOPS = Pos, Neg
 
 from operator import eq, ne, lt, gt, le, ge
 Eq = create_binop('Eq', eq)
@@ -443,7 +447,7 @@ Not = create_binop('Not', not_)
 Xor = create_binop('Xor', xor)
 Is  = create_binop('Is',  is_)
 
-BINOPS = (Eq, Ne, Lt, Gt, Le, Ge, Add, Sub, Mul, Div, Mod, Pow, And, Or, Not, Xor, Is)
+BINOPS = Eq, Ne, Lt, Gt, Le, Ge, Add, Sub, Mul, Div, Mod, Pow, And, Or, Not, Xor, Is
 
 def create_pyfunc(name, func):
     code = dedent(f'''
@@ -511,14 +515,14 @@ class Atom(Node):
         super().__init__(value)
     value = property(lambda self: self.children[0])
     def __iter__(self):
-        yield PushImm(self)
+        yield PushImm(self.value)
 
 class Nil(Node):
     def __call__(self, env):
         return self
     value = property(lambda self: None)
     def __iter__(self):
-        yield PushImm(self)
+        yield PushImm(self.value)
 Nil = Nil()
 
 class True_(Node):
@@ -526,7 +530,7 @@ class True_(Node):
         return self
     value = property(lambda self: True)
     def __iter__(self):
-        yield PushImm(self)
+        yield PushImm(self.value)
 True_ = True_()
 
 class False_(Node):
@@ -534,7 +538,7 @@ class False_(Node):
         return self
     value = property(lambda self: False)
     def __iter__(self):
-        yield PushImm(self)
+        yield PushImm(self.value)
 False_ = False_()
 
 class While(Node):
@@ -555,7 +559,7 @@ class While(Node):
             return cls(Node.parse(cond), Suite.parse(body))
         return cls(Node.parse(cond), Node.parse(*body))
     def __iter__(self):
-        start, end = f'loop-start-{id(self)}', f'loop-end-{id(self)}'
+        start, end = f'loop-start-{hex(id(self))}', f'loop-end-{hex(id(self))}'
         yield Label(start)
         yield from self.cond
         yield JumpIfFalse(end)
@@ -585,7 +589,7 @@ class IfElse(Node):
             return cls(Node.parse(cond), Node.parse(ifbody), Node.parse(*elsebody))
         return cls(Node.parse(cond), Node.parse(ifbody))
     def __iter__(self):
-        ifbody, elsebody, end = f'ifbody-{id(self)}', f'elsebody-{id(self)}', f'end-{id(self)}'
+        ifbody, elsebody, end = f'ifbody-{hex(id(self))}', f'elsebody-{hex(id(self))}', f'end-{hex(id(self))}'
         yield from self.cond
         if self.elsebody:
             yield JumpIfFalse(elsebody)
@@ -710,357 +714,16 @@ class Eval(Node):
         _, expr = tree
         return cls(Node.parse(expr))
 
-class Inst:
-    def __init__(self, *children):
-        self.children = children
-    def __repr__(self):
-        return f'{type(self).__name__}({", ".join(repr(x) for x in self.children)})'
+__all__ = [
+    'Node', 'NotImplemented', 'Comment', 'Suite', 'Set', 'Setg', 'Setc',
+    'Ret', 'List', 'Params', 'Cons', 'Car', 'Cdr', 'Cell', 'ProgramError',
+    'Assert', 'Pos', 'Neg', 'Eq', 'Ne', 'Lt', 'Gt', 'Le', 'Ge', 'Add', 'Sub',
+    'Mul', 'Div', 'Mod', 'Pow', 'And', 'Or', 'Not', 'Xor', 'Is',
+    'Print', 'Format', 'Printf', 'Printfs', 'Name',
+    'Var', 'Atom', 'Nil', 'True_', 'False_', 'While', 'IfElse', 'Call',
+    'TailCall', 'UfuncBase', 'Scoping', 'Lambda', 'Read', 'Parse', 'Eval',
 
-class Noop(Inst):
-    def __call__(self):
-        pass
+    'BINOPS', 'UNOPS',
 
-class Missing(Inst):
-    def __init__(self, node):
-        super().__init__(node)
-    node = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        raise NotImplementedError(f'unimplemented bytecode for {self.node}')
-
-class CallPyFunc(Inst):
-    def __init__(self, func, args):
-        super().__init__(func, args)
-    func = property(lambda self: self.children[0])
-    args = property(lambda self: self.children[1])
-    def __call__(self, frames):
-        args = [frames[-1].pop() for _ in range(self.args)]
-        args = [arg.value for arg in args] # unwrap
-        rv = self.func(*args)
-        rv = Atom(rv) # wrap
-        frames[-1].push(rv)
-
-class Halt(Inst):
-    def __init__(self, catch_fire=False):
-        super().__init__(catch_fire)
-    catch_fire = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        frames.clear()
-
-class PushImm(Inst):
-    def __init__(self, value):
-        super().__init__(value)
-    value = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        frames[-1].push(self.value)
-
-class PushVar(Inst):
-    def __init__(self, name):
-        super().__init__(name)
-    name = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        frames[-1].push(frames[-1].env[self.name])
-
-class PopVar(Inst):
-    def __init__(self, name):
-        super().__init__(name)
-    name = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        frames[-1].env[self.name] = frames[-1].pop()
-
-class Label(Inst):
-    def __init__(self, name):
-        super().__init__(name)
-    name = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        pass
-
-class JumpAlways(Inst):
-    def __init__(self, label):
-        super().__init__(label)
-    label = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        frames[-1].jump(self.label)
-
-class JumpIfTrue(Inst):
-    def __init__(self, label):
-        super().__init__(label)
-    label = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        val = frames[-1].pop()
-        if val.value:
-            frames[-1].jump(self.label)
-
-class JumpIfFalse(Inst):
-    def __init__(self, label):
-        super().__init__(label)
-    label = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        val = frames[-1].pop()
-        if not val.value:
-            frames[-1].jump(self.label)
-
-class Ufunc(UfuncBase):
-    def __init__(self, params, body, closures):
-        super().__init__(params, body, closures)
-    params   = property(lambda self: self.children[0])
-    body     = property(lambda self: self.children[1])
-    closures = property(lambda self: self.children[2])
-    def __call__(self, frames):
-        pass
-
-class CreateFunc(Inst):
-    def __init__(self, params, body):
-        super().__init__(params.value, [*body, PopFunc()])
-    params = property(lambda self: self.children[0])
-    body   = property(lambda self: self.children[1])
-    def __call__(self, frames):
-        if isinstance(frames[-1].env, ChainMap):
-            closures = frames[-1].env.maps[:-1]
-        else:
-            closures = []
-        func = Ufunc(self.params, self.body, closures)
-        frames[-1].push(func)
-
-class PushFunc(Inst):
-    def __init__(self, name):
-        super().__init__(name)
-    name = property(lambda self: self.children[0])
-    def prepare(self, frames):
-        func = frames[-1].env[self.name]
-        local_env = {}
-        for n in func.params:
-            local_env[n] = frames[-1].pop()
-        outer_env = frames[-1].env
-        if isinstance(outer_env, ChainMap):
-            env = ChainMap(local_env, *func.closures, outer_env.maps[-1])
-        else:
-            env = ChainMap(local_env, *func.closures, outer_env)
-        return func, env
-    def __call__(self, frames):
-        func, env = self.prepare(frames)
-        frame = Frame(func.body, env=env, stats=frames[-1].stats)
-        frames.append(frame)
-
-        # stats
-        stats = frames[-1].stats
-        stats.func_calls += 1
-        stats.num_frames += 1
-        stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
-
-class PushTailFunc(PushFunc):
-    def __call__(self, frames):
-        func, env = self.prepare(frames)
-        frame = frames[-1]
-        frame.pc = 0
-        frame.env = env
-
-        # stats
-        stats = frames[-1].stats
-        stats.func_calls += 1
-        stats.num_frames += 0
-        stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
-
-class PushRawFunc(Inst):
-    def __init__(self, insts, names=(), pc=0, stack=None, env=None):
-        super().__init__(insts, names, pc, stack, env)
-    insts = property(lambda self: self.children[0])
-    names = property(lambda self: self.children[1])
-    pc    = property(lambda self: self.children[2])
-    stack = property(lambda self: self.children[3])
-    env   = property(lambda self: self.children[4])
-    def __call__(self, frames):
-        if self.env is None:
-            local_env = {}
-        else:
-            local_env = self.env
-        for n in self.names:
-            local_env[n] = frames[-1].pop()
-        outer_env = frames[-1].env
-        if isinstance(outer_env, ChainMap):
-            env = ChainMap(local_env, outer_env.maps[-1])
-        else:
-            env = ChainMap(local_env, outer_env)
-        frame = Frame(self.insts, self.pc, self.stack, env, stats=frames[-1].stats)
-        frames.append(frame)
-
-        # stats
-        stats = frames[-1].stats
-        stats.func_calls += 1
-        stats.num_frames += 1
-        stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
-
-class PopFunc(Inst):
-    def __init__(self, name=None):
-        super().__init__(name)
-    name = property(lambda self: self.children[0])
-    def __call__(self, frames):
-        if self.name is not None:
-            rv = frames[-1].env[self.name]
-        else:
-            rv = frames[-1].pop()
-        frames.pop()
-        if frames: frames[-1].push(rv)
-
-class Stats:
-    def __init__(self):
-        self.func_calls = 0
-        self.num_frames = 0
-        self.max_frame_depth = 0
-    def __repr__(self):
-        return f'Stats(func_calls={self.func_calls!r}, num_frames={self.num_frames!r}, max_frame_depth={self.max_frame_depth!r})'
-
-class Frame:
-    def __init__(self, insts, pc=0, stack=None, env=None, stats=None):
-        self.insts = insts
-        self.labels = {inst.name: idx for idx, inst in enumerate(insts)
-                       if isinstance(inst, Label)}
-        self.pc = pc
-        if stack is None:
-            stack = []
-        self.stack = stack
-        if env is None:
-            env = {}
-        self.env = env
-        if stats is None:
-            stats = Stats()
-        self.stats = stats
-    def __iter__(self):
-        self.pc = 0
-        return self
-    def __next__(self):
-        if self.pc is None or not (0 <= self.pc < len(self.insts)):
-            raise StopIteration()
-        inst = self.insts[self.pc]
-        self.pc += 1
-        return inst
-    def __repr__(self):
-        return f'Frame(insts={self.insts!r}, pc={self.pc!r}, stack={self.stack!r}, env={self.env!r})'
-    def push(self, value):
-        self.stack.append(value)
-    def pop(self):
-        return self.stack.pop()
-    def jump(self, label):
-        self.pc = self.labels[label]
-
-def eval(insts, env=None):
-    if env is None:
-        env = {}
-
-    stats = Stats()
-    frames = [Frame(insts, env=env, stats=stats)]
-    stats.num_frames += 1
-    stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
-    while frames:
-        try:
-            inst = next(frames[-1])
-        except StopIteration:
-            break
-        try:
-            inst(frames)
-        except IndexError:
-            print(inst)
-            print(frames[-1])
-            print('-' * 50)
-            for pc in range(frames[-1].pc-5, frames[-1].pc+5):
-                if 0 <= pc < len(frames[-1].insts):
-                    print(frames[-1].insts[pc])
-            print('-' * 50)
-            raise
-    return stats
-
-NAME     = '[^"\'() \n\t]+'
-QUOTED   = r'"(?:[^"\\]|\\.)*"'
-LPAREN   = "'?" + escape('(')
-RPAREN   = escape(')')
-TOKEN    = f'({NAME}|{QUOTED}|{LPAREN}|{RPAREN})'
-TOKEN_RE = compile(TOKEN)
-
-def tokenize(s):
-    for token in TOKEN_RE.split(s):
-        if token.strip():
-            yield token
-    return
-
-def build_tree(tokens):
-    rv = []
-    current = [rv]
-    for value in tokens:
-        if value == '(':
-            t = []
-            current[-1].append(t)
-            current.append(t)
-        elif value == "'(":
-            t = ['quoted', []]
-            current[-1].append(t)
-            current.append(t[-1])
-        elif value == ')':
-            current.pop()
-        else:
-            current[-1].append(value)
-    return rv
-
-def build_nodes(tree):
-    return Node.parse(tree)
-
-def build_ast(tokens):
-    tree = build_tree(tokens)
-    logger.info('tree:\n%s', pformat(tree))
-    nodes = build_nodes(tree)
-    logger.info('nodes:\n%s', pformat(nodes))
-    return nodes
-
-def parse(s):
-    tokens = list(tokenize(s))
-    logger.info('tokens\n%s', pformat(tokens))
-    ast = build_ast(tokens)
-    return ast
-
-def traverse(tree, func=None):
-    if not isinstance(tree, Node):
-        return
-    if isinstance(tree, Set) \
-        and isinstance(tree.value, Lambda):
-        func = tree.name
-
-    yield tree, func
-    for child in tree.children:
-        yield from traverse(child, func)
-
-def constant_folding(tree):
-    tree = deepcopy(tree)
-    finished = False
-    while True:
-        did_optimization = False
-        for node, _ in traverse(tree):
-            if isinstance(node, UNOPS) \
-                and isinstance(node.arg, Atom):
-                new_node = node(env={})
-                node.replace(new_node)
-                did_optimization = True
-        for node, _ in traverse(tree):
-            if isinstance(node, BINOPS) \
-                and isinstance(node.left, Atom) \
-                and isinstance(node.right, Atom):
-                new_node = node(env={})
-                node.replace(new_node)
-                did_optimization = True
-        if not did_optimization:
-            break
-    return tree
-
-def identify_tail_calls(tree):
-    tree = deepcopy(tree)
-
-    for node, func in traverse(tree):
-        if isinstance(node, Ret) \
-            and isinstance(node.value, Call) \
-            and node.value.name.name == func.name:
-            new_node = Ret(TailCall(*node.value.children))
-            node.replace(new_node)
-
-    return tree
-
-def optimize_ast(tree, optimizations=(constant_folding, identify_tail_calls)):
-    for opt in optimizations:
-        tree = opt(tree)
-    return tree
+    'create_pyfunc',
+]
