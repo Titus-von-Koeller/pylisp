@@ -200,6 +200,7 @@ class Set(Node):
         yield PushVar(self.name.value)
 
 class Setg(Node):
+    # TODO
     @debug
     def __call__(self, env):
         name, value = self.name(env), self.value(env)
@@ -218,6 +219,7 @@ class Setg(Node):
         return cls(Name(name), Node.parse(value))
 
 class Setc(Node):
+    # TODO
     @debug
     def __call__(self, env):
         name, value = self.name(env), self.value(env)
@@ -280,6 +282,7 @@ class List(Node):
         yield CallPyFunc(self.build, len(self.values))
 
 class Params(Node):
+    # TODO
     def __call__(self, env):
         return self
     def __init__(self, *params):
@@ -339,6 +342,7 @@ class Cdr(Node):
         yield CallPyFunc(lambda x: x[1], 1)
 
 class Cell(Node):
+    # TODO
     @debug
     def __call__(self, env):
         return self
@@ -352,6 +356,7 @@ class ProgramError(Exception):
     pass
 
 class Assert(Node):
+    # TODO
     @debug
     def __call__(self, env):
         if not self.cond(env).value:
@@ -367,6 +372,7 @@ class Assert(Node):
         return cls(Node.parse(cond), Node.parse(msg))
 
 def create_binop(name, op):
+    # XXX
     code = dedent(f'''
     def create_op(op):
         class {name}(Node):
@@ -394,6 +400,7 @@ def create_binop(name, op):
     return ns['create_op'](op)
 
 def create_unop(name, op):
+    # XXX
     code = dedent(f'''
     def create_op(op):
         class {name}(Node):
@@ -631,6 +638,7 @@ class TailCall(Call):
         yield PushTailFunc(self.name.value)
 
 class UfuncBase(Node):
+    # XXX
     pass
 
 class Scoping(Enum):
@@ -673,6 +681,7 @@ class Lambda(Node):
         yield CreateFunc(self.params, self.body)
 
 class Read(Node):
+    # TODO
     @debug
     def __call__(self, env):
         if '--stdin' in env:
@@ -686,6 +695,7 @@ class Read(Node):
         return cls()
 
 class Parse(Node):
+    # TODO
     @debug
     def __call__(self, env):
         expr = self.expr
@@ -701,6 +711,7 @@ class Parse(Node):
         return cls(Node.parse(expr))
 
 class Eval(Node):
+    # TODO
     @debug
     def __call__(self, env):
         expr = self.expr
