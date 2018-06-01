@@ -200,7 +200,6 @@ class Set(Node):
         yield PushVar(self.name.value)
 
 class Setg(Node):
-    # TODO
     @debug
     def __call__(self, env):
         name, value = self.name(env), self.value(env)
@@ -217,9 +216,12 @@ class Setg(Node):
     def parse(cls, tree):
         _, name, value = tree
         return cls(Name(name), Node.parse(value))
+    def __iter__(self):
+        yield from self.value
+        yield PopGlobalVar(self.name.value)
+        yield PushGlobalVar(self.name.value)
 
 class Setc(Node):
-    # TODO
     @debug
     def __call__(self, env):
         name, value = self.name(env), self.value(env)
@@ -236,6 +238,10 @@ class Setc(Node):
     def parse(cls, tree):
         _, name, value = tree
         return cls(Name(name), Node.parse(value))
+    def __iter__(self):
+        yield from self.value
+        yield PopClosureVar(self.name.value)
+        yield PushClosureVar(self.name.value)
 
 class Ret(Node):
     @debug
@@ -282,7 +288,6 @@ class List(Node):
         yield CallPyFunc(self.build, len(self.values))
 
 class Params(Node):
-    # TODO
     def __call__(self, env):
         return self
     def __init__(self, *params):
@@ -342,7 +347,6 @@ class Cdr(Node):
         yield CallPyFunc(lambda x: x[1], 1)
 
 class Cell(Node):
-    # TODO
     @debug
     def __call__(self, env):
         return self
@@ -355,8 +359,12 @@ class Cell(Node):
 class ProgramError(Exception):
     pass
 
+def check_assert(cond, msg):
+    if not cond:
+        raise ProgramError(msg)
+    return Nil
+
 class Assert(Node):
-    # TODO
     @debug
     def __call__(self, env):
         if not self.cond(env).value:
@@ -370,6 +378,10 @@ class Assert(Node):
     def parse(cls, tree):
         _, cond, msg = tree
         return cls(Node.parse(cond), Node.parse(msg))
+    def __iter__(self):
+        yield from self.msg
+        yield from self.cond
+        yield CallPyFunc(check_assert, 2)
 
 def create_binop(name, op):
     # XXX
@@ -483,10 +495,10 @@ def create_pyfunc(name, func):
     exec(code, globals(), ns)
     return ns['create_func'](func)
 
-Print   = create_pyfunc('Print',   print)
+Print   = create_pyfunc('Print',   lambda *args: print(*args, flush=True))
 Format  = create_pyfunc('Format',  format)
-Printf  = create_pyfunc('Printf',  lambda fmt, *args:      print(fmt.format(*args), end=''))
-Printfs = create_pyfunc('Printfs', lambda fmt, sep, *args: print(fmt.format(*args), sep=sep, end=''))
+Printf  = create_pyfunc('Printf',  lambda fmt, *args:      print(fmt.format(*args), end='', flush=True))
+Printfs = create_pyfunc('Printfs', lambda fmt, sep, *args: print(fmt.format(*args), sep=sep, end='', flush=True))
 
 class Name(Node):
     @debug
@@ -678,10 +690,9 @@ class Lambda(Node):
         _, params, body = tree
         return cls(Params.parse(params), Node.parse(body))
     def __iter__(self):
-        yield CreateFunc(self.params, self.body)
+        yield CreateFunc(self.params.value, self.body)
 
 class Read(Node):
-    # TODO
     @debug
     def __call__(self, env):
         if '--stdin' in env:
@@ -693,9 +704,10 @@ class Read(Node):
     @classmethod
     def parse(cls, tree):
         return cls()
+    def __iter__(self):
+        yield ReadInput()
 
 class Parse(Node):
-    # TODO
     @debug
     def __call__(self, env):
         expr = self.expr
@@ -709,9 +721,11 @@ class Parse(Node):
     def parse(cls, tree):
         _, expr = tree
         return cls(Node.parse(expr))
+    def __iter__(self):
+        yield from self.expr
+        yield CallPyFunc(parse, 1)
 
 class Eval(Node):
-    # TODO
     @debug
     def __call__(self, env):
         expr = self.expr
@@ -724,6 +738,9 @@ class Eval(Node):
     def parse(cls, tree):
         _, expr = tree
         return cls(Node.parse(expr))
+    def __iter__(self):
+        yield from self.expr
+        yield Evaluate()
 
 __all__ = [
     'Node', 'NotImplemented', 'Comment', 'Suite', 'Set', 'Setg', 'Setc',

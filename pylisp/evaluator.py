@@ -13,14 +13,16 @@ def evaluate(insts, env=None):
     frames = [Frame(insts, env=env, stats=stats)]
     stats.num_frames += 1
     stats.max_frame_depth = max(stats.max_frame_depth, len(frames))
-    for step in count():
+    for step in count(start=1):
         if not frames:
             break
 
         try:
             inst = next(frames[-1])
         except StopIteration:
-            break
+            frames.pop()
+            continue
+
         try:
             f = frames[-1]
             logger.debug('step             = %r', step)

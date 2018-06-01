@@ -700,6 +700,45 @@ def test_optimizer():
         print(inst)
     evaluate(optimized_bytecode)
 
+def test_functionality():
+    code = r'''
+        (print "Functionality test.")
+
+        (set x (** 2 10))
+        (set y (+ x 1))
+        (assert (== y 1025) "Math error.")
+
+        /*
+            (printf "What is your name? ")
+            (set name (read))
+            (printf "Hello, {}\n" name)
+            /* nested comment */
+        */
+
+        (set x 1) /* global */
+        (set y 20) /* global */
+        (set f (lambda (y) (
+            (printf "in f, before  x={:5} y={:5}\n" x y)
+            (set  y 300) /* local */
+            (setg x 4000) /* global */
+            (printf "in f, after   x={:5} y={:5}\n" x y)
+        )))
+        
+        (printf "      before  x={:5} y={:5}\n" x y)
+        (f (* y 10))
+        (printf "      after   x={:5} y={:5}\n" x y)
+
+        (set code "(+ 1 1)")
+        (set suite (parse code))
+        (printf "suite = {}\n" suite)
+        (printf "{} => {}\n" code (eval suite))
+
+        (print "Functionality test passed.")
+    '''
+    suite = optimize_ast(parse(code))
+    bytecodes = optimize_bytecodes(list(suite))
+    evaluate(bytecodes)
+
 parser = ArgumentParser()
 parser.add_argument('-v', '--verbose', action='count')
 parser.add_argument('-s', '--stats', action='store_true', default=False)
@@ -766,6 +805,9 @@ if __name__ == '__main__':
 
     if 'optimizer' in args.tests or not args.tests:
         test_optimizer()
+
+    if 'functionality' in args.tests or not args.tests:
+        test_functionality()
 
     print('All tests passed!')
 

@@ -56,12 +56,49 @@ class PushVar(Inst):
     def __call__(self, frames):
         frames[-1].push(frames[-1].env[self.name])
 
+class PushGlobalVar(PushVar):
+    def __call__(self, frames):
+        frame = frames[-1]
+        if isinstance(frame.env, ChainMap):
+            frame.push(frame.env.maps[-1][self.name])
+        else:
+            frame.push(frame.env[self.name])
+
+class PushClosureVar(PushVar):
+    def __call__(self, frames):
+        frame = frames[-1]
+        if isinstance(env, ChainMap):
+            frame.push(frame.env.maps[1][self.name])
+        else:
+            frame.push(frame.env[self.name])
+
+class PushVar(PushVar):
+    def __call__(self, frames):
+        frames[-1].push(frames[-1].env[self.name])
+
+
 class PopVar(Inst):
     def __init__(self, name):
         super().__init__(name)
     name = property(lambda self: self.children[0])
     def __call__(self, frames):
         frames[-1].env[self.name] = frames[-1].pop()
+
+class PopGlobalVar(PopVar):
+    def __call__(self, frames):
+        frame = frames[-1]
+        if isinstance(frame.env, ChainMap):
+            frame.env.maps[-1][self.name] = frame.pop()
+        else:
+            frame.env[self.name] = frame.pop()
+
+class PopClosureVar(PopVar):
+    def __call__(self, frames):
+        frame = frames[-1]
+        if isinstance(frame.env, ChainMap):
+            frame.env.maps[1][self.name] = frame.pop()
+        else:
+            frame.env[self.name] = frame.pop()
 
 class StoreVar(Inst):
     def __init__(self, name):
@@ -113,7 +150,7 @@ class Ufunc(Inst):
 
 class CreateFunc(Inst):
     def __init__(self, params, body):
-        super().__init__(params.value, [*body, PopFunc()])
+        super().__init__(params, [*body, PopFunc()])
     params = property(lambda self: self.children[0])
     body   = property(lambda self: self.children[1])
     def __call__(self, frames):
@@ -206,9 +243,38 @@ class PopFunc(Inst):
         frames.pop()
         if frames: frames[-1].push(rv)
 
+class ReadInput(Inst):
+    def __init__(self):
+        super().__init__()
+    def __call__(self, frames):
+        from sys import stdin
+        frame = frames[-1]
+        if '--stdin' in frame.env:
+            rv = frame.env['--stdin']()
+        else: 
+            rv = next(stdin)
+        frame.push(rv)
+
+class Evaluate(Inst):
+    def __init__(self):
+        super().__init__()
+    def __call__(self, frames):
+        frame = frames[-1]
+        suite = frame.pop()
+        insts = list(suite)
+        # NOTE: use PushRawFunc instead of recurisve call to evaluate
+        #       otherwise we will blow up Python functional call stack
+        #       evaluation of bytecode should only use frames object
+        #       not Python function call stack
+        # NOTE: reuse frame.stack so that results of the evaluation
+        #       are visible from the outside
+        PushRawFunc(insts, stack=frame.stack)(frames)
+
 __all__ = [
     'Inst', 'Noop', 'Missing', 'CallPyFunc', 'Halt',
     'PushImm', 'PushVar', 'PopVar', 'StoreVar', 'Label',
+    'PushClosureVar', 'PopClosureVar', 'PushGlobalVar', 'PopGlobalVar',
     'JumpAlways', 'JumpIfTrue', 'JumpIfFalse', 'Ufunc',
     'CreateFunc', 'PushFunc', 'PushTailFunc', 'PushRawFunc', 'PopFunc',
+    'ReadInput', 'Evaluate',
 ]

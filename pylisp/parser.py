@@ -8,7 +8,9 @@ NAME     = '[^"\'() \n\t]+'
 QUOTED   = r'"(?:[^"\\]|\\.)*"'
 LPAREN   = "'?" + escape('(')
 RPAREN   = escape(')')
-TOKEN    = f'({NAME}|{QUOTED}|{LPAREN}|{RPAREN})'
+LCOMMENT = escape('/*')
+RCOMMENT = escape('*/')
+TOKEN    = f'({LCOMMENT}|{RCOMMENT}|{NAME}|{QUOTED}|{LPAREN}|{RPAREN})'
 TOKEN_RE = compile(TOKEN)
 
 def tokenize(s):
@@ -20,8 +22,15 @@ def tokenize(s):
 def build_tree(tokens):
     rv = []
     current = [rv]
+    comment_depth = 0
     for value in tokens:
-        if value == '(':
+        if value == '/*':
+            comment_depth += 1
+        elif value == '*/':
+            comment_depth -= 1
+        elif comment_depth:
+            continue
+        elif value == '(':
             t = []
             current[-1].append(t)
             current.append(t)
