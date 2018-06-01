@@ -17,3 +17,22 @@ It has the following features:
     - can add new hard-coded node types easily
     - can add new byte-code instructions easily
     - capable of extension to compilation to assembly
+
+# How to Use
+Run `python test-nodes.py` from the current directory to run tests.
+
+You can run a specific test with `python test-nodes.py TEST`.
+
+Tests include:
+- cons (cons/car/cdr test)
+- arithmetic (arithmetic test)
+- controlflow (if-else/while test)
+- functions (function definition, call test)
+- repl
+- scoping (dynamic/lexical scoping test)
+- bytecode, bytecode2, bytecode3 (bytecode generation, evaluation test)
+- optimizer (bytecode and ast optimizer test)
+- functionality (extra functionality test)
+
+Author: Titus v. Köller
+MIT-licensed
