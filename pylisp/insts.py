@@ -72,11 +72,6 @@ class PushClosureVar(PushVar):
         else:
             frame.push(frame.env[self.name])
 
-class PushVar(PushVar):
-    def __call__(self, frames):
-        frames[-1].push(frames[-1].env[self.name])
-
-
 class PopVar(Inst):
     def __init__(self, name):
         super().__init__(name)
