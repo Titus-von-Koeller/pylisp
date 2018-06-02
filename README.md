@@ -76,17 +76,21 @@ Building the AST occurs in two steps:
 ## `nodes.py`
 `nodes.py` contains the definition of every AST node. Each AST node knows how to parse itself from a tree expression. In the original attempt, each AST node also implemented `__call__(self, env)`, to allow for evaluation.
 	At the topmost node in a program would be a `Suite`-node, whose call would evaluate each of its children in sequence. 
-	Each child node would evaluate its own children as appropriate and this would allow us to execute a program, reusing the Python function stack.
+
+Each child node would evaluate its own children as appropriate and this would allow us to execute a program, reusing the Python function stack.
 	Every node would correspond to one Python function call. 
 	An env variable would be threaded through these function calls to represent the environment, global and local variables that the program would operate on.
-	This Lisp-like language included a looping primitive as a built-in node: the `While`-node.
+
+This Lisp-like language included a looping primitive as a built-in node: the `While`-node.
 	Many Lisp and Scheme dialects have no looping primitives and instead rely on recursion for implementing loops.
 	There is a well-know correspondence between looping and tail-recursion.
-	Because the initial execution approach used the Python function stack and Python has a built-in recursion limit,
+
+Because the initial execution approach used the Python function stack and Python has a built-in recursion limit,
 	programs that rely on tail-recursion would ultimately fail.
 	As a consequence, another approach was sought to allow for automatic tail-call optimization 
 	and the implementation of tail recursion within fixed memory constraints.
-	This required building a separate function call mechanism that did not completely rely on the Python function call stack, because Python's recursion limit cannot be avoided.
+
+This required building a separate function call mechanism that did not completely rely on the Python function call stack, because Python's recursion limit cannot be avoided.
 	Therefore, each node implements an `__iter__(self)`, which yields bytecode instructions for this alternate execution mechanism.
 	The idea is that you could use `__call__()` to evaluate the AST directly using Python's function stack or use `__iter__()` to get the bytecodes equivalent to the AST and feed them to a seperate executor/evaluator.
 	Given a program, `suite`, the program can be 'compiled to bytecode' by simply calling `list(suite)`.
@@ -122,10 +126,12 @@ Building the AST occurs in two steps:
 `frame.py` contains the definition for the `Frame` class, which represents our native function call stack frame.
 A frame consists of a linear sequence of instructions, i.e. a Python list of insts objects, a program counter (PC) that identifies the next instruction to execute, a stack (implemented as a Python list) of values that instructions operate on (our evaluator is a stack-based machine), an env, which is a mapping (Python dictionary) of local, closure, and global variables to their values. 
 	Having both a stack and an env mimics the operation of other real-world bytecode interpreters, such as Python's. 
-	If one were to implement compilation to assembly, the stack would be retained and would likely use the assembly level stack, i.e. the one which the ASM-level pop/push instructions operate on, but the env would likely have to be eliminated.
+
+If one were to implement compilation to assembly, the stack would be retained and would likely use the assembly level stack, i.e. the one which the ASM-level pop/push instructions operate on, but the env would likely have to be eliminated.
 	In retaining the stack, we would likely add another index variable, in addition to the PC, so that we could use one contiguous of linear memory.
 	This variable would be called the stack pointer (SP).
-	In our current implementation we have multiple non-contiguous stacks, one per frame, therefore no need for an SP.
+
+In our current implementation we have multiple non-contiguous stacks, one per frame, therefore no need for an SP.
 	To remove the env, we would implement a symbol table approach and turn variable lookups into direct memory accesses.
 	These memory accesses would use relative addressing, relative to the SP.
 	This would work for all of our local variables and absolute memory addressing would work for all of the global variables. 
@@ -138,8 +144,8 @@ A frame consists of a linear sequence of instructions, i.e. a Python list of ins
  `optimizer.py` implements both a bytecode and an AST optimizer. The AST optimizer searches for set patterns in the AST and replaces those nodes with optimized variants. 
  
  Two sample AST optimizations have been implmented:
- 	- constant folding: arythmetic expressions that only involve constant values are evaluated directly and replaced with the result. This evaluation uses the non-bytecode evaluator which we know to be safe because there will be no recursion in these evaluations. We repeatedly apply constant folding until no further optimizations can be made
- 	- tail-recursion/TCO: We look for function calls within functions wherein the function call is the only value being returned and the function call matches the name of the function containing it.
+- constant folding: arythmetic expressions that only involve constant values are evaluated directly and replaced with the result. This evaluation uses the non-bytecode evaluator which we know to be safe because there will be no recursion in these evaluations. We repeatedly apply constant folding until no further optimizations can be made
+- tail-recursion/TCO: We look for function calls within functions wherein the function call is the only value being returned and the function call matches the name of the function containing it.
 		We replace the `Call` node with the `TailCall` node, where the `Call` node compiles to a `PushFunc` and the `TailCall` node compiles to a `PushTailFunc`. 
 		The `PushTailFunc` reuses the current frame rather than creating a new frame and just resets the PC and updates the env. 
 		The bytecode optimizer is a peephole optimizer, meaning it looks at windows of a set size of instructions and simplifies those instructions.
